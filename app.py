@@ -1,6 +1,6 @@
 """
 나트랑 패밀리 베이스캠프 🌴
-안정성 최우선 & 모벤픽 5박 특화 버전 (Stable & Movenpick Edition)
+안정성 최우선 & 모벤픽 5박 특화 버전 (Stable & Movenpick Edition - Final)
 """
 
 import streamlit as st
@@ -46,10 +46,11 @@ init_session_state()
 # 2. API 키 관리 (클라우드 금고 연동)
 # ──────────────────────────────────────────────
 try:
-    # 스트림릿 Secrets 금고에서 키를 가져옵니다.
+    # 스트림릿 Secrets 금고에서 키를 안전하게 가져옵니다.
     KEY_GEMINI = st.secrets["api_keys"]["gemini"]
     KEY_WEATHER = st.secrets["api_keys"]["open_weather"]
 except Exception:
+    # 금고에 키가 없으면 빈 문자열로 처리 (에러 방지)
     KEY_GEMINI = ""
     KEY_WEATHER = ""
 
@@ -136,7 +137,7 @@ def render_ai_tab():
         prompt = st.chat_input("예: 베트남어로 고수 빼주세요가 뭐야?")
         if prompt:
             if not KEY_GEMINI:
-                st.warning("사이드바에 Gemini API 키를 입력해주세요!")
+                st.warning("스트림릿 금고(Secrets)에 Gemini API 키를 넣어주세요!")
             else:
                 st.session_state.messages.append({"role": "user", "content": prompt})
                 with st.spinner("답변 생성 중..."):
@@ -144,9 +145,9 @@ def render_ai_tab():
                         model = genai.GenerativeModel("gemini-1.5-flash")
                         response = model.generate_content(prompt)
                         st.session_state.messages.append({"role": "assistant", "content": response.text})
-                        st.rerun() # 성공했을 때만 새로고침!
+                        st.rerun() # 성공했을 때만 화면 새로고침
                     except Exception as e:
-                        # 에러가 나면 새로고침 하지 않고 에러 원인을 화면에 보여줌
+                        # 에러가 나면 새로고침을 멈추고 에러 원인을 화면에 보여줌
                         st.error(f"🚨 AI 연결 오류: {e}")
                         st.info("💡 팁: API 키 복사 시 띄어쓰기가 들어갔거나 키가 잘못되었을 확률이 높습니다.")
 
@@ -154,12 +155,13 @@ def render_ai_tab():
         st.subheader("🕵️ 아이들 미션")
         if st.button("🎲 오늘의 미션 뽑기", use_container_width=True, key="btn_mission"):
             if not KEY_GEMINI:
-                st.warning("API 키가 필요합니다.")
+                st.warning("스트림릿 금고(Secrets)에 API 키가 필요합니다.")
             else:
                 with st.spinner("미션 만드는 중..."):
                     try:
                         model = genai.GenerativeModel("gemini-1.5-flash")
                         res = model.generate_content('나트랑 가족 여행 중 4학년, 1학년 아이들을 위한 짧은 미션 3개를 JSON 배열로만 줘. 포맷: [{"emoji":"🍉","title":"미션이름","points":10}]').text
+                        # 정규식으로 JSON 추출 (안정성 강화)
                         match = re.search(r'\[.*\]', res, re.DOTALL)
                         if match:
                             st.session_state.missions = json.loads(match.group(0))
@@ -168,6 +170,7 @@ def render_ai_tab():
 
         if st.session_state.missions:
             for i, m in enumerate(st.session_state.missions):
+                # 체크박스 상태를 강제로 session_state에 묶어 충돌 방지
                 st.checkbox(f"{m.get('emoji','')} **{m.get('title','')}** (+{m.get('points',10)}점)", key=f"msn_{i}")
 
 def render_board_tab():
@@ -254,7 +257,7 @@ def render_budget_tab():
             except:
                 st.warning("날씨 정보를 가져올 수 없습니다.")
         else:
-            st.info("사이드바에 OpenWeather API 키를 넣으면 날씨가 보입니다.")
+            st.info("앱 설정(Secrets)에 OpenWeather API 키를 넣으면 날씨가 보입니다.")
 
 # ──────────────────────────────────────────────
 # 5. 메인 앱 실행
