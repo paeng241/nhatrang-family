@@ -141,12 +141,14 @@ def render_ai_tab():
                 st.session_state.messages.append({"role": "user", "content": prompt})
                 with st.spinner("답변 생성 중..."):
                     try:
-                        model = genai.GenerativeModel("gemini-1.5-pro")
+                        model = genai.GenerativeModel("gemini-1.5-flash")
                         response = model.generate_content(prompt)
                         st.session_state.messages.append({"role": "assistant", "content": response.text})
+                        st.rerun() # 성공했을 때만 새로고침!
                     except Exception as e:
-                        st.error("오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
-                st.rerun()
+                        # 에러가 나면 새로고침 하지 않고 에러 원인을 화면에 보여줌
+                        st.error(f"🚨 AI 연결 오류: {e}")
+                        st.info("💡 팁: API 키 복사 시 띄어쓰기가 들어갔거나 키가 잘못되었을 확률이 높습니다.")
 
     with c2:
         st.subheader("🕵️ 아이들 미션")
@@ -156,18 +158,16 @@ def render_ai_tab():
             else:
                 with st.spinner("미션 만드는 중..."):
                     try:
-                        model = genai.GenerativeModel("gemini-1.5-pro")
+                        model = genai.GenerativeModel("gemini-1.5-flash")
                         res = model.generate_content('나트랑 가족 여행 중 4학년, 1학년 아이들을 위한 짧은 미션 3개를 JSON 배열로만 줘. 포맷: [{"emoji":"🍉","title":"미션이름","points":10}]').text
-                        # 정규식으로 JSON 추출 (안정성 강화)
                         match = re.search(r'\[.*\]', res, re.DOTALL)
                         if match:
                             st.session_state.missions = json.loads(match.group(0))
-                    except Exception:
-                        st.error("미션 생성에 실패했어요. 다시 눌러주세요.")
+                    except Exception as e:
+                        st.error(f"미션 생성 실패: {e}")
 
         if st.session_state.missions:
             for i, m in enumerate(st.session_state.missions):
-                # 체크박스 상태를 강제로 session_state에 묶어 충돌 방지
                 st.checkbox(f"{m.get('emoji','')} **{m.get('title','')}** (+{m.get('points',10)}점)", key=f"msn_{i}")
 
 def render_board_tab():
