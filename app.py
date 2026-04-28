@@ -43,14 +43,15 @@ def init_session_state():
 init_session_state()
 
 # ──────────────────────────────────────────────
-# 2. API 키 관리 (사이드바)
+# 2. API 키 관리 (클라우드 금고 연동)
 # ──────────────────────────────────────────────
-with st.sidebar:
-    st.subheader("🔑 API 키 설정")
-    st.caption("새로고침해도 유지되도록 코드를 직접 수정하거나 여기에 입력하세요.")
-    # 개발의 편의를 위해 여기에 직접 발급받으신 키를 문자열로 적어두셔도 됩니다.
-    KEY_GEMINI = st.text_input("Gemini API Key", type="password", key="key_gem")
-    KEY_WEATHER = st.text_input("OpenWeather Key", type="password", key="key_wth")
+try:
+    # 스트림릿 Secrets 금고에서 키를 가져옵니다.
+    KEY_GEMINI = st.secrets["api_keys"]["gemini"]
+    KEY_WEATHER = st.secrets["api_keys"]["open_weather"]
+except Exception:
+    KEY_GEMINI = ""
+    KEY_WEATHER = ""
 
 if KEY_GEMINI:
     try:
