@@ -142,7 +142,7 @@ def render_ai_tab():
                 st.session_state.messages.append({"role": "user", "content": prompt})
                 with st.spinner("답변 생성 중..."):
                     try:
-                        model = genai.GenerativeModel("gemini-1.5-flash")
+                        model = genai.GenerativeModel("gemini-1.5-pro")
                         response = model.generate_content(prompt)
                         st.session_state.messages.append({"role": "assistant", "content": response.text})
                         st.rerun() # 성공했을 때만 화면 새로고침
