@@ -17,6 +17,7 @@ from datetime import datetime, date, timedelta
 from PIL import Image
 import io
 import base64
+from math import radians, sin, cos, sqrt, atan2
 
 # ═══════════════════════════════════════════════════════════════
 # 1. 페이지 설정
@@ -194,6 +195,24 @@ EMERGENCY = [
     ("✈️ 깜란 국제공항", "+84-258-3989-919", "항공편 문의"),
 ]
 
+# ─────────────────────────────────────────────
+# 주요 명소 좌표 (구글지도용)
+# ─────────────────────────────────────────────
+PLACES = [
+    {"name": "🏨 모벤픽 리조트 깜란", "lat": 11.9688, "lon": 109.2162, "info": "우리 숙소 (5박)"},
+    {"name": "✈️ 깜란 국제공항", "lat": 11.9981, "lon": 109.2193, "info": "도착·출발지"},
+    {"name": "🏖️ 깜란 베이 (롱비치)", "lat": 11.9695, "lon": 109.2190, "info": "리조트 인근 해변"},
+    {"name": "⛪ 포나가르 참탑", "lat": 12.2654, "lon": 109.1956, "info": "9세기 힌두 사원"},
+    {"name": "🛕 롱선사 (백불상)", "lat": 12.2515, "lon": 109.1794, "info": "거대 좌불상"},
+    {"name": "⛪ 나트랑 대성당", "lat": 12.2476, "lon": 109.1853, "info": "고딕 양식 성당"},
+    {"name": "🛍️ 롯데마트 나트랑", "lat": 12.2354, "lon": 109.1936, "info": "기념품·간식"},
+    {"name": "🎡 나트랑 야시장", "lat": 12.2394, "lon": 109.1944, "info": "쇼핑·먹거리"},
+    {"name": "🎢 빈원더스 나트랑", "lat": 12.2192, "lon": 109.2569, "info": "테마파크 (케이블카)"},
+    {"name": "🍤 코스타 시푸드", "lat": 12.2334, "lon": 109.1956, "info": "유명 해산물 식당"},
+    {"name": "🌊 혼쫑 곶", "lat": 12.2742, "lon": 109.2090, "info": "기암절벽 풍경"},
+    {"name": "🏝️ 혼문섬 (스노클링)", "lat": 12.1819, "lon": 109.2950, "info": "보트 투어"},
+]
+
 # ═══════════════════════════════════════════════════════════════
 # 3. 세션 상태 초기화
 # ═══════════════════════════════════════════════════════════════
@@ -316,6 +335,68 @@ def get_weather(lat, lon):
         }
     except Exception:
         return None
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_exchange_rates():
+    """무료 환율 API. KRW 1원 기준 환율 반환. 10분 캐시."""
+    try:
+        res = requests.get("https://open.er-api.com/v6/latest/KRW", timeout=4).json()
+        if res.get("result") == "success":
+            updated = res.get("time_last_update_utc", "")
+            return res["rates"], updated, None
+    except Exception as e:
+        return None, None, str(e)
+    return None, None, "API 응답 오류"
+
+
+def get_rates():
+    """실시간 환율 + 실패시 기본값 fallback"""
+    rates, updated, err = fetch_exchange_rates()
+    if rates and "VND" in rates and "USD" in rates:
+        # 1 KRW 기준 → 1원당 VND, 1원당 USD
+        vnd_per_krw = rates["VND"]
+        usd_per_krw = rates["USD"]
+        krw_per_usd = 1 / usd_per_krw if usd_per_krw else 1370
+        vnd_per_usd = krw_per_usd * vnd_per_krw
+        return {
+            "vnd_per_krw": vnd_per_krw,
+            "usd_per_krw": usd_per_krw,
+            "krw_per_usd": krw_per_usd,
+            "vnd_per_usd": vnd_per_usd,
+            "updated": updated,
+            "live": True,
+        }
+    # 기본값 (API 실패시)
+    return {
+        "vnd_per_krw": 18.5, "usd_per_krw": 1/1370,
+        "krw_per_usd": 1370, "vnd_per_usd": 25400,
+        "updated": "", "live": False,
+    }
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def cached_translate_to_vi(text):
+    """한→베 번역 (10분 캐시, 동일 입력은 즉시 반환)"""
+    p = f"""다음 한국어를 베트남어로 번역하고 한글 발음을 알려주세요.
+형식만 정확히 지키고 다른 설명은 하지 마세요:
+
+🇻🇳 베트남어: ...
+🔊 발음: ...
+💡 팁: (있다면 한 줄)
+
+한국어: {text}"""
+    return gemini_call(p)
+
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    """두 좌표 간 직선거리 (km)"""
+    R = 6371
+    p1, p2 = radians(lat1), radians(lat2)
+    dp = radians(lat2 - lat1)
+    dl = radians(lon2 - lon1)
+    a = sin(dp/2)**2 + cos(p1)*cos(p2)*sin(dl/2)**2
+    return 2 * R * atan2(sqrt(a), sqrt(1-a))
 
 
 def weekday_kr(d):
@@ -580,6 +661,82 @@ def render_home():
         c2.metric("인원", f"{len(st.session_state.members)}명")
 
 # ═══════════════════════════════════════════════════════════════
+# 9-2. 화면: 구글 지도
+# ═══════════════════════════════════════════════════════════════
+def render_map():
+    st.markdown("### 🗺️ 깜란 & 나트랑 명소 지도")
+    st.caption("주요 명소를 선택하면 구글 지도에서 위치를 보여줍니다")
+    
+    # 호텔 좌표 (거리 계산 기준)
+    hotel = PLACES[0]
+    
+    col_select, col_info = st.columns([2, 1])
+    
+    with col_select:
+        place_names = [p["name"] for p in PLACES]
+        selected_name = st.selectbox(
+            "📌 장소 선택", 
+            place_names, 
+            key="map_place_sel",
+        )
+    
+    place = next(p for p in PLACES if p["name"] == selected_name)
+    
+    with col_info:
+        st.markdown(f"""
+        <div class='card' style='margin-top:28px;'>
+            <div style='color:#ffd60a; font-weight:700;'>{place['name']}</div>
+            <div style='font-size:0.9rem; color:#cfe8ff; margin-top:4px;'>{place['info']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # 구글지도 임베드 (API 키 불필요)
+    embed_url = (
+        f"https://maps.google.com/maps?"
+        f"q={place['lat']},{place['lon']}"
+        f"&hl=ko&z=15&output=embed"
+    )
+    st.components.v1.iframe(embed_url, height=420)
+    
+    # 액션 버튼
+    col_b1, col_b2 = st.columns(2)
+    with col_b1:
+        gmaps_url = f"https://www.google.com/maps/search/?api=1&query={place['lat']},{place['lon']}"
+        st.link_button("📱 구글 지도 앱으로 열기", gmaps_url, use_container_width=True)
+    with col_b2:
+        # 호텔에서 길찾기
+        dir_url = (
+            f"https://www.google.com/maps/dir/?api=1"
+            f"&origin={hotel['lat']},{hotel['lon']}"
+            f"&destination={place['lat']},{place['lon']}"
+        )
+        st.link_button("🚗 호텔에서 길찾기", dir_url, use_container_width=True)
+    
+    # 호텔로부터 거리
+    if place["name"] != hotel["name"]:
+        dist = haversine_km(hotel["lat"], hotel["lon"], place["lat"], place["lon"])
+        st.info(f"🏨 모벤픽에서 직선거리 약 **{dist:.1f}km** (실제 도로거리는 더 길 수 있어요)")
+    else:
+        st.success("🏨 우리 숙소예요!")
+    
+    # 전체 명소 한눈에
+    st.markdown("---")
+    st.markdown("##### 📍 모든 명소 한눈에")
+    
+    cols = st.columns(3)
+    for i, p in enumerate(PLACES):
+        with cols[i % 3]:
+            dist_str = ""
+            if p["name"] != hotel["name"]:
+                d = haversine_km(hotel["lat"], hotel["lon"], p["lat"], p["lon"])
+                dist_str = f" · {d:.1f}km"
+            st.markdown(f"""
+            <div class='card' style='padding:10px; margin-bottom:6px;'>
+                <div style='color:#ffd60a; font-weight:600; font-size:0.9rem;'>{p['name']}</div>
+                <div style='font-size:0.78rem; color:#9fd0ff;'>{p['info']}{dist_str}</div>
+            </div>""", unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════
 # 10. 화면: 일정 (편집 가능)
 # ═══════════════════════════════════════════════════════════════
 def render_itinerary():
@@ -722,22 +879,24 @@ def render_ai():
                     </div>""", unsafe_allow_html=True)
 
         st.markdown("---")
-        st.markdown("##### ✨ 즉석 번역 (한 → 베)")
-        ko_text = st.text_input("번역할 한국어", placeholder="예: 이거 포장해주세요")
-        if st.button("번역하기", use_container_width=True) and ko_text:
-            with st.spinner("번역 중..."):
-                p = f"""다음 한국어를 베트남어로 번역하고, 한글 발음도 함께 알려주세요.
-형식:
-🇻🇳 베트남어: ...
-🔊 발음: ...
-💡 팁: (있다면 짧게)
-
-한국어: {ko_text}"""
-                text, err = gemini_call(p)
-                if text:
-                    st.success(text)
-                else:
-                    st.error(err)
+        st.markdown("##### ✨ 실시간 번역 (한 → 베)")
+        st.caption("입력 후 Enter → 자동 번역 · 같은 단어는 캐시되어 즉시 표시")
+        
+        ko_text = st.text_input(
+            "번역할 한국어",
+            placeholder="예: 이거 포장해주세요",
+            key="trans_input",
+            label_visibility="collapsed",
+        )
+        
+        if ko_text and ko_text.strip():
+            with st.spinner("번역 중..." if not st.session_state.get("_last_trans") == ko_text else ""):
+                text, err = cached_translate_to_vi(ko_text.strip())
+                st.session_state["_last_trans"] = ko_text
+            if text:
+                st.success(text)
+            elif err:
+                st.error(err)
 
     with sub_tab3:
         st.markdown("##### 📷 메뉴판·간판 사진 번역")
@@ -1039,34 +1198,51 @@ def render_budget():
 
     with sub2:
         st.markdown("##### 빠른 환율 계산")
-        st.caption("기준: 1원 ≈ 18.5동, 1달러 ≈ 1,370원")
+        
+        # 실시간 환율 가져오기
+        rates = get_rates()
+        if rates["live"]:
+            st.caption(f"🟢 실시간 환율 · 1원 = {rates['vnd_per_krw']:.2f} VND / 1$ = {rates['krw_per_usd']:,.0f}원")
+            if rates["updated"]:
+                st.caption(f"📅 최종 업데이트: {rates['updated']}")
+        else:
+            st.caption("🟡 환율 API 응답 없음 → 기본값 사용 (1원=18.5동, 1$=1,370원)")
+        
+        if st.button("🔄 환율 새로고침", help="캐시를 지우고 최신 환율 다시 받기"):
+            fetch_exchange_rates.clear()
+            st.rerun()
         
         t1, t2, t3 = st.tabs(["원 → 동", "동 → 원", "달러 → 원"])
         with t1:
             krw = st.number_input("원화 (KRW)", min_value=0, value=50000, step=10000, key="krw1")
             if krw > 0:
+                vnd = krw * rates["vnd_per_krw"]
+                usd = krw * rates["usd_per_krw"]
                 st.markdown(f"""
                 <div class='card'>
-                    🇻🇳 약 <b style='color:#ffd60a; font-size:1.3rem;'>{krw*18.5:,.0f} VND</b><br>
-                    🇺🇸 약 <b style='color:#ffd60a; font-size:1.1rem;'>${krw/1370:,.2f} USD</b>
+                    🇻🇳 약 <b style='color:#ffd60a; font-size:1.3rem;'>{vnd:,.0f} VND</b><br>
+                    🇺🇸 약 <b style='color:#ffd60a; font-size:1.1rem;'>${usd:,.2f} USD</b>
                 </div>""", unsafe_allow_html=True)
 
         with t2:
             vnd = st.number_input("베트남동 (VND)", min_value=0, value=100000, step=50000, key="vnd1")
             if vnd > 0:
+                krw_result = vnd / rates["vnd_per_krw"]
                 st.markdown(f"""
                 <div class='card'>
-                    🇰🇷 약 <b style='color:#ffd60a; font-size:1.3rem;'>{vnd/18.5:,.0f}원</b>
+                    🇰🇷 약 <b style='color:#ffd60a; font-size:1.3rem;'>{krw_result:,.0f}원</b>
                 </div>""", unsafe_allow_html=True)
                 st.info("💡 꿀팁: VND에서 0 하나 빼고 ÷2 (10만동 ≈ 5천원)")
 
         with t3:
             usd = st.number_input("미국달러 (USD)", min_value=0.0, value=10.0, step=10.0, key="usd1")
             if usd > 0:
+                krw_result = usd * rates["krw_per_usd"]
+                vnd_result = usd * rates["vnd_per_usd"]
                 st.markdown(f"""
                 <div class='card'>
-                    🇰🇷 약 <b style='color:#ffd60a; font-size:1.3rem;'>{usd*1370:,.0f}원</b><br>
-                    🇻🇳 약 <b style='color:#ffd60a; font-size:1.1rem;'>{usd*25400:,.0f} VND</b>
+                    🇰🇷 약 <b style='color:#ffd60a; font-size:1.3rem;'>{krw_result:,.0f}원</b><br>
+                    🇻🇳 약 <b style='color:#ffd60a; font-size:1.1rem;'>{vnd_result:,.0f} VND</b>
                 </div>""", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
@@ -1180,14 +1356,15 @@ def main():
         unsafe_allow_html=True,
     )
 
-    tabs = st.tabs(["🏠 홈", "📅 일정", "🤖 AI비서", "👨‍👩‍👧‍👦 가족", "💰 가계부", "🎒 준비"])
+    tabs = st.tabs(["🏠 홈", "📅 일정", "🗺️ 지도", "🤖 AI비서", "👨‍👩‍👧‍👦 가족", "💰 가계부", "🎒 준비"])
 
     with tabs[0]: render_home()
     with tabs[1]: render_itinerary()
-    with tabs[2]: render_ai()
-    with tabs[3]: render_family()
-    with tabs[4]: render_budget()
-    with tabs[5]: render_prep()
+    with tabs[2]: render_map()
+    with tabs[3]: render_ai()
+    with tabs[4]: render_family()
+    with tabs[5]: render_budget()
+    with tabs[6]: render_prep()
 
 
 if __name__ == "__main__":
