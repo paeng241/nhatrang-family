@@ -41,12 +41,17 @@ HOTEL_LON = 109.2162
 
 LOCATIONS = ["🏨 모벤픽", "🏖️ 해변/수영장", "🍜 식당", "🎡 관광지", "🚐 이동중"]
 
-# Gemini 모델 우선순위 (앞에서부터 시도, 실패시 다음으로)
+# Gemini 모델 우선순위 (무료 한도 큰 순서대로 시도)
+# 무료 티어 분당 요청 한도 (RPM):
+#   - gemini-2.5-flash-lite: 15 RPM ← 가장 여유로움
+#   - gemini-2.0-flash:      15 RPM
+#   - gemini-2.5-flash:       5 RPM ← 가장 빨리 소진
+#   - gemini-flash-latest:    가변
 GEMINI_MODELS = [
-    "gemini-2.5-flash",      # 1순위: 안정 버전
-    "gemini-flash-latest",   # 2순위: 항상 최신
-    "gemini-2.0-flash",      # 3순위: 구버전
-    "gemini-2.5-flash-lite", # 4순위: 최저가
+    "gemini-2.5-flash-lite", # 1순위: 분당 15회 (가장 여유)
+    "gemini-2.0-flash",      # 2순위: 분당 15회
+    "gemini-2.5-flash",      # 3순위: 분당 5회 (품질 ↑ but 빨리 소진)
+    "gemini-flash-latest",   # 4순위: fallback
 ]
 
 # ─────────────────────────────────────────────
@@ -267,7 +272,8 @@ if KEY_GEMINI:
 # 5. Gemini API (다중 모델 fallback)
 # ═══════════════════════════════════════════════════════════════
 def gemini_request(content_parts):
-    """여러 모델을 순차 시도. 처음 성공한 모델은 캐시."""
+    """여러 모델을 순차 시도. 처음 성공한 모델은 캐시.
+    404(모델 없음) + 429(할당량 초과) 모두 자동으로 다음 모델로 넘김."""
     if not KEY_GEMINI:
         return None, "❌ Gemini API 키가 없습니다.\n\n.streamlit/secrets.toml 에 등록:\n```\n[api_keys]\ngemini = \"your-key\"\n```"
 
@@ -277,6 +283,8 @@ def gemini_request(content_parts):
         models_order.insert(0, st.session_state.active_model)
 
     errors = []
+    quota_exceeded_count = 0
+    
     for model_name in models_order:
         try:
             model = genai.GenerativeModel(model_name)
@@ -285,19 +293,48 @@ def gemini_request(content_parts):
             return response.text, None
         except Exception as e:
             err_msg = str(e)
-            errors.append(f"• `{model_name}`: {err_msg[:120]}")
-            # 404/not found가 아닌 에러(인증/할당량)는 즉시 중단
-            if "404" not in err_msg and "not found" not in err_msg.lower():
+            err_lower = err_msg.lower()
+            
+            is_quota = "429" in err_msg or "quota" in err_lower or "rate limit" in err_lower or "exceeded" in err_lower
+            is_not_found = "404" in err_msg or "not found" in err_lower
+            
+            if is_quota:
+                quota_exceeded_count += 1
+                errors.append(f"• `{model_name}`: 분당 한도 초과")
+            else:
+                errors.append(f"• `{model_name}`: {err_msg[:100]}")
+            
+            # 404, 429 외의 에러(인증 등)는 즉시 중단
+            if not is_not_found and not is_quota:
                 st.session_state.active_model = None
                 return None, f"🚨 API 오류 ({model_name}):\n\n{err_msg}"
+            
+            # 캐시된 모델이 실패한 경우 캐시 무효화
+            if model_name == st.session_state.active_model:
+                st.session_state.active_model = None
             continue
 
     st.session_state.active_model = None
+    
+    if quota_exceeded_count == len(models_order):
+        return None, ("⏱️ **모든 모델의 분당 한도가 초과됐습니다.**\n\n"
+                      "💡 **해결 방법**:\n"
+                      "1. **30~60초 기다린 후 다시 시도** (분당 카운터 자동 리셋)\n"
+                      "2. https://aistudio.google.com/apikey 에서 결제 등록 시 한도 대폭 증가\n"
+                      "3. 사용량 확인: https://ai.dev/rate-limit\n\n"
+                      "📊 **무료 티어 분당 한도(RPM)**:\n"
+                      "• gemini-2.5-flash-lite: 15회\n"
+                      "• gemini-2.0-flash: 15회\n"
+                      "• gemini-2.5-flash: 5회\n\n"
+                      "💰 **결제 등록 후 한도(Tier 1)**:\n"
+                      "• 거의 모든 모델 1,000~2,000 RPM\n"
+                      "• 가족여행 정도면 절대 초과 안 함")
+    
     return None, ("🚨 모든 Gemini 모델 호출 실패.\n\n시도 결과:\n" + "\n".join(errors) + 
                   "\n\n💡 해결 방법:\n"
                   "1. `pip install -U google-generativeai` 라이브러리 업데이트\n"
                   "2. https://aistudio.google.com 에서 API 키 유효성 확인\n"
-                  "3. 무료 할당량(분당/일일) 초과 여부 확인")
+                  "3. 30~60초 후 재시도")
 
 
 def gemini_call(prompt):
@@ -1137,7 +1174,14 @@ def render_ai():
     sub_tab1, sub_tab2, sub_tab3 = st.tabs(["🤖 AI 채팅", "🇻🇳 베트남어 회화", "📷 사진 번역"])
 
     if st.session_state.active_model:
-        st.caption(f"✅ 사용 중인 모델: `{st.session_state.active_model}`")
+        rpm_info = {
+            "gemini-2.5-flash-lite": "분당 15회",
+            "gemini-2.0-flash": "분당 15회",
+            "gemini-2.5-flash": "분당 5회",
+            "gemini-flash-latest": "가변",
+        }
+        rpm = rpm_info.get(st.session_state.active_model, "?")
+        st.caption(f"✅ 사용 중: `{st.session_state.active_model}` · 무료 한도 {rpm}")
 
     with sub_tab1:
         st.markdown("##### 무엇이든 물어보세요")
