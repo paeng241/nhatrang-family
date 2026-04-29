@@ -1,7 +1,11 @@
 """
 나트랑 패밀리 베이스캠프 🌴
 2026.05.10 (일) - 2026.05.15 (금) | 모벤픽 리조트 깜란 5박 6일
-대가족 10명 여행 종합 대시보드
+
+주요 기능:
+- 일정 / 준비물 / 인원 자유 편집
+- 실시간 HTML5 사진 줌 (재로딩 없음)
+- Gemini 멀티 모델 fallback (404 자동 회피)
 """
 
 import streamlit as st
@@ -25,7 +29,7 @@ st.set_page_config(
 )
 
 # ═══════════════════════════════════════════════════════════════
-# 2. 여행 기본 정보 (상수)
+# 2. 여행 상수
 # ═══════════════════════════════════════════════════════════════
 TRIP_START = date(2026, 5, 10)
 TRIP_END = date(2026, 5, 15)
@@ -34,133 +38,94 @@ HOTEL_NAME = "모벤픽 리조트 & 스파 깜란"
 HOTEL_LAT = 11.9688
 HOTEL_LON = 109.2162
 
-FAMILY_MEMBERS = [
+LOCATIONS = ["🏨 모벤픽", "🏖️ 해변/수영장", "🍜 식당", "🎡 관광지", "🚐 이동중"]
+
+# Gemini 모델 우선순위 (앞에서부터 시도, 실패시 다음으로)
+GEMINI_MODELS = [
+    "gemini-2.5-flash",      # 1순위: 안정 버전
+    "gemini-flash-latest",   # 2순위: 항상 최신
+    "gemini-2.0-flash",      # 3순위: 구버전
+    "gemini-2.5-flash-lite", # 4순위: 최저가
+]
+
+# ─────────────────────────────────────────────
+# 기본값 (사용자가 자유 편집 가능)
+# ─────────────────────────────────────────────
+DEFAULT_MEMBERS = [
     "아빠", "엄마", "할머니", "할아버지",
     "첫째 (4학년)", "윤우 (1학년)", "막내 (취학전)",
     "삼촌", "이모", "사촌",
 ]
 
-LOCATIONS = ["🏨 모벤픽", "🏖️ 해변/수영장", "🍜 식당", "🎡 관광지", "🚐 이동중"]
-
-# ─────────────────────────────────────────────
-# 일자별 일정
-# ─────────────────────────────────────────────
-ITINERARY = {
-    date(2026, 5, 10): {
+DEFAULT_ITINERARY = {
+    "2026-05-10": {
         "title": "출발 · 인천 → 깜란",
         "tip": "긴 비행, 편한 옷차림 / 아이들 멀미약 챙기기",
         "items": [
-            ("출발 3h전", "🛫", "인천공항 집결"),
-            ("비행", "✈️", "인천 → 깜란 (약 5시간 30분)"),
-            ("도착 후", "🏨", "모벤픽 리조트 체크인"),
-            ("저녁", "🍽️", "리조트 내 식사 & 휴식"),
+            ["출발 3h전", "🛫", "인천공항 집결"],
+            ["비행", "✈️", "인천 → 깜란 (약 5시간 30분)"],
+            ["도착 후", "🏨", "모벤픽 리조트 체크인"],
+            ["저녁", "🍽️", "리조트 내 식사 & 휴식"],
         ],
     },
-    date(2026, 5, 11): {
+    "2026-05-11": {
         "title": "리조트 적응 · 모벤픽 만끽",
         "tip": "선크림 필수, 모자/래쉬가드 챙기기",
         "items": [
-            ("07:00", "🌅", "조식 - 모벤픽 뷔페"),
-            ("10:00", "🏊", "프라이빗 비치 & 수영장"),
-            ("13:00", "🍜", "리조트 점심 또는 룸서비스"),
-            ("15:00", "😴", "낮잠 / 키즈클럽 / 자유시간"),
-            ("18:30", "🌆", "선셋 디너"),
+            ["07:00", "🌅", "조식 - 모벤픽 뷔페"],
+            ["10:00", "🏊", "프라이빗 비치 & 수영장"],
+            ["13:00", "🍜", "리조트 점심 또는 룸서비스"],
+            ["15:00", "😴", "낮잠 / 키즈클럽 / 자유시간"],
+            ["18:30", "🌆", "선셋 디너"],
         ],
     },
-    date(2026, 5, 12): {
+    "2026-05-12": {
         "title": "나트랑 시내 투어",
         "tip": "오후 햇볕 강함, 양산·물 챙기기",
         "items": [
-            ("09:00", "🚐", "그랩카로 나트랑 시내 (약 40분)"),
-            ("10:00", "⛪", "포나가르 참탑"),
-            ("12:00", "🍲", "현지 쌀국수 점심"),
-            ("14:00", "🛍️", "롯데마트 (간식·기념품)"),
-            ("17:00", "🎡", "나트랑 야시장 & 저녁식사"),
+            ["09:00", "🚐", "그랩카로 나트랑 시내 (약 40분)"],
+            ["10:00", "⛪", "포나가르 참탑"],
+            ["12:00", "🍲", "현지 쌀국수 점심"],
+            ["14:00", "🛍️", "롯데마트 (간식·기념품)"],
+            ["17:00", "🎡", "나트랑 야시장 & 저녁식사"],
         ],
     },
-    date(2026, 5, 13): {
+    "2026-05-13": {
         "title": "빈원더스 또는 자유 휴식",
         "tip": "물놀이용 옷·수건 별도 / 어르신은 리조트 추천",
         "items": [
-            ("종일 A안", "🎢", "빈원더스 나트랑 (케이블카+워터파크)"),
-            ("종일 B안", "🏖️", "리조트 풀빌라 휴식"),
-            ("18:00", "🍤", "해산물 레스토랑 디너"),
+            ["종일 A안", "🎢", "빈원더스 나트랑 (케이블카+워터파크)"],
+            ["종일 B안", "🏖️", "리조트 풀빌라 휴식"],
+            ["18:00", "🍤", "해산물 레스토랑 디너"],
         ],
     },
-    date(2026, 5, 14): {
+    "2026-05-14": {
         "title": "마지막 날 알차게",
         "tip": "짐 정리도 슬슬 시작",
         "items": [
-            ("08:00", "🌅", "여유로운 조식"),
-            ("10:00", "💆", "스파/마사지 (어른) · 키즈클럽 (아이)"),
-            ("14:00", "🏊", "마지막 수영"),
-            ("16:30", "📸", "가족 단체사진"),
-            ("18:30", "🍽️", "특별 디너"),
+            ["08:00", "🌅", "여유로운 조식"],
+            ["10:00", "💆", "스파/마사지 (어른) · 키즈클럽 (아이)"],
+            ["14:00", "🏊", "마지막 수영"],
+            ["16:30", "📸", "가족 단체사진"],
+            ["18:30", "🍽️", "특별 디너"],
         ],
     },
-    date(2026, 5, 15): {
+    "2026-05-15": {
         "title": "귀국 · 깜란 → 인천",
         "tip": "공항까지 약 20분 / 여권·기내가방 다시 확인",
         "items": [
-            ("09:00", "🧳", "짐 정리 & 여권 점검"),
-            ("11:00", "🚪", "체크아웃 (지연체크아웃 협의)"),
-            ("공항", "🛍️", "깜란공항 면세점"),
-            ("비행", "✈️", "깜란 → 인천"),
-            ("도착", "🏠", "집으로!"),
+            ["09:00", "🧳", "짐 정리 & 여권 점검"],
+            ["11:00", "🚪", "체크아웃 (지연체크아웃 협의)"],
+            ["공항", "🛍️", "깜란공항 면세점"],
+            ["비행", "✈️", "깜란 → 인천"],
+            ["도착", "🏠", "집으로!"],
         ],
     },
 }
 
-# ─────────────────────────────────────────────
-# 베트남어 핵심 표현
-# ─────────────────────────────────────────────
-PHRASES = {
-    "인사·기본": [
-        ("안녕하세요", "Xin chào", "씬 짜오"),
-        ("감사합니다", "Cảm ơn", "깜언"),
-        ("죄송합니다", "Xin lỗi", "씬 로이"),
-        ("네 / 아니요", "Vâng / Không", "벙 / 콩"),
-    ],
-    "식당": [
-        ("얼마예요?", "Bao nhiêu tiền?", "바오 니에우 띠엔?"),
-        ("계산해주세요", "Tính tiền", "띤 띠엔"),
-        ("고수 빼주세요", "Không rau mùi", "콩 자우 무이"),
-        ("맵지 않게요", "Không cay", "콩 까이"),
-        ("얼음 빼주세요", "Không đá", "콩 다"),
-        ("물 한 잔 주세요", "Cho tôi nước", "쪼 또이 느억"),
-        ("맛있어요!", "Ngon quá!", "응온 꽈!"),
-    ],
-    "쇼핑·이동": [
-        ("비싸요 / 깎아주세요", "Đắt quá / Giảm giá", "닷꽈 / 잠 자"),
-        ("여기로 가주세요", "Đi đến đây", "디 덴 더이"),
-        ("화장실 어디예요?", "Nhà vệ sinh ở đâu?", "냐 베신 어 더우?"),
-    ],
-    "긴급": [
-        ("도와주세요", "Giúp tôi với", "줍 또이 버이"),
-        ("아파요", "Tôi bị đau", "또이 비 다우"),
-        ("병원 어디예요?", "Bệnh viện ở đâu?", "벤 비엔 어 더우?"),
-    ],
-}
-
-# ─────────────────────────────────────────────
-# 비상 연락처
-# ─────────────────────────────────────────────
-EMERGENCY = [
-    ("🇰🇷 영사콜센터 (24h)", "+82-2-3210-0404", "한국어 상담"),
-    ("🇰🇷 주베트남 한국대사관", "+84-24-3831-5111", "사고/사건 발생시"),
-    ("🚨 베트남 경찰", "113", "긴급"),
-    ("🚑 베트남 응급의료", "115", "응급"),
-    ("🔥 베트남 소방", "114", "화재"),
-    ("🏨 모벤픽 깜란", "+84-258-3989-666", "프론트"),
-    ("✈️ 깜란 국제공항", "+84-258-3989-919", "항공편 문의"),
-]
-
-# ─────────────────────────────────────────────
-# 짐 체크리스트
-# ─────────────────────────────────────────────
-PACKING_LIST = {
+DEFAULT_PACKING = {
     "📄 서류·금융": [
-        "여권 (전원 10명, 6개월 이상 유효)",
+        "여권 (전원 확인, 6개월 이상 유효)",
         "여권 사본 + 사진 (분실 대비)",
         "E-티켓 / 호텔 바우처",
         "여행자보험 증명서",
@@ -191,12 +156,53 @@ PACKING_LIST = {
     ],
 }
 
+PHRASES = {
+    "인사·기본": [
+        ("안녕하세요", "Xin chào", "씬 짜오"),
+        ("감사합니다", "Cảm ơn", "깜언"),
+        ("죄송합니다", "Xin lỗi", "씬 로이"),
+        ("네 / 아니요", "Vâng / Không", "벙 / 콩"),
+    ],
+    "식당": [
+        ("얼마예요?", "Bao nhiêu tiền?", "바오 니에우 띠엔?"),
+        ("계산해주세요", "Tính tiền", "띤 띠엔"),
+        ("고수 빼주세요", "Không rau mùi", "콩 자우 무이"),
+        ("맵지 않게요", "Không cay", "콩 까이"),
+        ("얼음 빼주세요", "Không đá", "콩 다"),
+        ("물 한 잔 주세요", "Cho tôi nước", "쪼 또이 느억"),
+        ("맛있어요!", "Ngon quá!", "응온 꽈!"),
+    ],
+    "쇼핑·이동": [
+        ("비싸요 / 깎아주세요", "Đắt quá / Giảm giá", "닷꽈 / 잠 자"),
+        ("여기로 가주세요", "Đi đến đây", "디 덴 더이"),
+        ("화장실 어디예요?", "Nhà vệ sinh ở đâu?", "냐 베신 어 더우?"),
+    ],
+    "긴급": [
+        ("도와주세요", "Giúp tôi với", "줍 또이 버이"),
+        ("아파요", "Tôi bị đau", "또이 비 다우"),
+        ("병원 어디예요?", "Bệnh viện ở đâu?", "벤 비엔 어 더우?"),
+    ],
+}
+
+EMERGENCY = [
+    ("🇰🇷 영사콜센터 (24h)", "+82-2-3210-0404", "한국어 상담"),
+    ("🇰🇷 주베트남 한국대사관", "+84-24-3831-5111", "사고/사건 발생시"),
+    ("🚨 베트남 경찰", "113", "긴급"),
+    ("🚑 베트남 응급의료", "115", "응급"),
+    ("🔥 베트남 소방", "114", "화재"),
+    ("🏨 모벤픽 깜란", "+84-258-3989-666", "프론트"),
+    ("✈️ 깜란 국제공항", "+84-258-3989-919", "항공편 문의"),
+]
+
 # ═══════════════════════════════════════════════════════════════
 # 3. 세션 상태 초기화
 # ═══════════════════════════════════════════════════════════════
 def init_state():
     defaults = {
-        "locations": {m: "🏨 모벤픽" for m in FAMILY_MEMBERS},
+        "members": list(DEFAULT_MEMBERS),
+        "itinerary": json.loads(json.dumps(DEFAULT_ITINERARY)),
+        "packing": json.loads(json.dumps(DEFAULT_PACKING)),
+        "locations": {},
         "messages": [],
         "missions": [],
         "notices": [{
@@ -206,15 +212,24 @@ def init_state():
         }],
         "budget": 5_000_000,
         "expenses": [],
+        "active_model": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
+    # 멤버↔위치 동기화
+    for m in st.session_state.members:
+        if m not in st.session_state.locations:
+            st.session_state.locations[m] = "🏨 모벤픽"
+    for m in list(st.session_state.locations.keys()):
+        if m not in st.session_state.members:
+            del st.session_state.locations[m]
+
 init_state()
 
 # ═══════════════════════════════════════════════════════════════
-# 4. API 키 로드
+# 4. API 키
 # ═══════════════════════════════════════════════════════════════
 try:
     KEY_GEMINI = st.secrets["api_keys"]["gemini"]
@@ -230,20 +245,62 @@ if KEY_GEMINI:
         pass
 
 # ═══════════════════════════════════════════════════════════════
-# 5. 유틸리티 함수
+# 5. Gemini API (다중 모델 fallback)
+# ═══════════════════════════════════════════════════════════════
+def gemini_request(content_parts):
+    """여러 모델을 순차 시도. 처음 성공한 모델은 캐시."""
+    if not KEY_GEMINI:
+        return None, "❌ Gemini API 키가 없습니다.\n\n.streamlit/secrets.toml 에 등록:\n```\n[api_keys]\ngemini = \"your-key\"\n```"
+
+    models_order = list(GEMINI_MODELS)
+    if st.session_state.active_model and st.session_state.active_model in models_order:
+        models_order.remove(st.session_state.active_model)
+        models_order.insert(0, st.session_state.active_model)
+
+    errors = []
+    for model_name in models_order:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(content_parts)
+            st.session_state.active_model = model_name
+            return response.text, None
+        except Exception as e:
+            err_msg = str(e)
+            errors.append(f"• `{model_name}`: {err_msg[:120]}")
+            # 404/not found가 아닌 에러(인증/할당량)는 즉시 중단
+            if "404" not in err_msg and "not found" not in err_msg.lower():
+                st.session_state.active_model = None
+                return None, f"🚨 API 오류 ({model_name}):\n\n{err_msg}"
+            continue
+
+    st.session_state.active_model = None
+    return None, ("🚨 모든 Gemini 모델 호출 실패.\n\n시도 결과:\n" + "\n".join(errors) + 
+                  "\n\n💡 해결 방법:\n"
+                  "1. `pip install -U google-generativeai` 라이브러리 업데이트\n"
+                  "2. https://aistudio.google.com 에서 API 키 유효성 확인\n"
+                  "3. 무료 할당량(분당/일일) 초과 여부 확인")
+
+
+def gemini_call(prompt):
+    return gemini_request(prompt)
+
+
+def gemini_vision(prompt, image):
+    return gemini_request([prompt, image])
+
+# ═══════════════════════════════════════════════════════════════
+# 6. 유틸
 # ═══════════════════════════════════════════════════════════════
 def get_trip_status():
-    """오늘의 여행 상태: (status, days_left, day_num)"""
     today = date.today()
     if today < TRIP_START:
         return "before", (TRIP_START - today).days, 0
     elif today > TRIP_END:
         return "after", 0, TOTAL_DAYS
-    else:
-        return "during", 0, (today - TRIP_START).days + 1
+    return "during", 0, (today - TRIP_START).days + 1
+
 
 def get_weather(lat, lon):
-    """OpenWeather API"""
     if not KEY_WEATHER:
         return None
     try:
@@ -253,124 +310,202 @@ def get_weather(lat, lon):
             timeout=4,
         ).json()
         return {
-            "temp": res["main"]["temp"],
-            "feels": res["main"]["feels_like"],
-            "humidity": res["main"]["humidity"],
-            "desc": res["weather"][0]["description"],
+            "temp": res["main"]["temp"], "feels": res["main"]["feels_like"],
+            "humidity": res["main"]["humidity"], "desc": res["weather"][0]["description"],
             "icon": res["weather"][0]["icon"],
         }
     except Exception:
         return None
 
-def gemini_call(prompt, model_name="gemini-2.5-flash"):
-    """Gemini API 호출 (text 응답, 에러시 None)"""
-    if not KEY_GEMINI:
-        return None, "API 키가 설정되지 않았습니다. Secrets에 키를 등록해주세요."
-    try:
-        model = genai.GenerativeModel(model_name)
-        return model.generate_content(prompt).text, None
-    except Exception as e:
-        return None, str(e)
-
-def gemini_vision(prompt, image, model_name="gemini-2.5-flash"):
-    """Gemini Vision API 호출 (이미지 + 프롬프트)"""
-    if not KEY_GEMINI:
-        return None, "API 키가 설정되지 않았습니다."
-    try:
-        model = genai.GenerativeModel(model_name)
-        return model.generate_content([prompt, image]).text, None
-    except Exception as e:
-        return None, str(e)
 
 def weekday_kr(d):
     return ["월", "화", "수", "목", "금", "토", "일"][d.weekday()]
 
+
+def date_str_to_obj(s):
+    return datetime.strptime(s, "%Y-%m-%d").date()
+
 # ═══════════════════════════════════════════════════════════════
-# 6. CSS 디자인
+# 7. CSS
 # ═══════════════════════════════════════════════════════════════
 st.markdown("""
 <style>
-.stApp {
-    background: linear-gradient(160deg, #0a2540 0%, #1a4d7a 50%, #2c7da0 100%);
-}
-.main-title {
-    font-size: 2rem; font-weight: 900; color: #ffd60a;
-    margin: 0; text-align: center; letter-spacing: -0.5px;
-}
-.subtitle {
-    text-align: center; color: #cfe8ff;
-    font-size: 0.9rem; margin-bottom: 12px;
-}
-.card {
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 14px; padding: 16px;
-    margin-bottom: 10px;
-}
-.card-title {
-    color: #ffd60a; font-weight: 700;
-    font-size: 1.05rem; margin-bottom: 8px;
-}
-.dday-card {
-    background: linear-gradient(135deg, #ff6b6b 0%, #ffd60a 100%);
-    color: #1a1a1a; text-align: center;
-    border-radius: 18px; padding: 22px;
-    margin-bottom: 16px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-}
+.stApp { background: linear-gradient(160deg, #0a2540 0%, #1a4d7a 50%, #2c7da0 100%); }
+.main-title { font-size: 2rem; font-weight: 900; color: #ffd60a; margin: 0; text-align: center; letter-spacing: -0.5px; }
+.subtitle { text-align: center; color: #cfe8ff; font-size: 0.9rem; margin-bottom: 12px; }
+.card { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 14px; padding: 16px; margin-bottom: 10px; }
+.card-title { color: #ffd60a; font-weight: 700; font-size: 1.05rem; margin-bottom: 8px; }
+.dday-card { background: linear-gradient(135deg, #ff6b6b 0%, #ffd60a 100%);
+             color: #1a1a1a; text-align: center; border-radius: 18px; padding: 22px;
+             margin-bottom: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
 .dday-num { font-size: 3rem; font-weight: 900; line-height: 1; }
-.timeline-item {
-    background: rgba(255,255,255,0.06);
-    border-left: 3px solid #ffd60a;
-    padding: 10px 14px; margin-bottom: 6px;
-    border-radius: 0 8px 8px 0; color: #fff;
-}
-.timeline-time {
-    color: #9fd0ff; font-weight: 600;
-    min-width: 90px; display: inline-block;
-}
-.phrase-card {
-    background: rgba(255,255,255,0.07);
-    padding: 12px 14px; border-radius: 10px;
-    margin-bottom: 6px;
-    border-left: 3px solid #2c7da0;
-}
+.timeline-item { background: rgba(255,255,255,0.06); border-left: 3px solid #ffd60a;
+                 padding: 10px 14px; margin-bottom: 6px; border-radius: 0 8px 8px 0; color: #fff; }
+.timeline-time { color: #9fd0ff; font-weight: 600; min-width: 90px; display: inline-block; }
+.phrase-card { background: rgba(255,255,255,0.07); padding: 12px 14px; border-radius: 10px;
+               margin-bottom: 6px; border-left: 3px solid #2c7da0; }
 .phrase-ko { color: #ffd60a; font-weight: 700; font-size: 0.95rem; }
 .phrase-vi { color: #fff; font-size: 1.1rem; font-weight: 600; margin-top: 2px; }
 .phrase-pron { color: #9fd0ff; font-style: italic; font-size: 0.85rem; }
-.emergency-card {
-    background: rgba(255,75,75,0.12);
-    border-left: 3px solid #ff4b4b;
-    padding: 10px 14px; border-radius: 0 8px 8px 0;
-    margin-bottom: 6px; color: #fff;
-}
-.location-pill {
-    background: rgba(255,214,10,0.15);
-    border: 1px solid rgba(255,214,10,0.3);
-    padding: 6px 12px; border-radius: 20px;
-    display: inline-block; margin: 2px;
-    font-size: 0.85rem; color: #fff;
-}
+.emergency-card { background: rgba(255,75,75,0.12); border-left: 3px solid #ff4b4b;
+                  padding: 10px 14px; border-radius: 0 8px 8px 0; margin-bottom: 6px; color: #fff; }
+.location-pill { background: rgba(255,214,10,0.15); border: 1px solid rgba(255,214,10,0.3);
+                 padding: 6px 12px; border-radius: 20px; display: inline-block;
+                 margin: 2px; font-size: 0.85rem; color: #fff; }
 .stTabs [data-baseweb="tab-list"] { gap: 4px; }
-.stTabs [data-baseweb="tab"] {
-    background: rgba(255,255,255,0.05);
-    border-radius: 8px 8px 0 0; padding: 8px 14px;
-}
-.stTabs [aria-selected="true"] {
-    background: rgba(255,214,10,0.2) !important;
-    color: #ffd60a !important;
-}
+.stTabs [data-baseweb="tab"] { background: rgba(255,255,255,0.05); border-radius: 8px 8px 0 0; padding: 8px 14px; }
+.stTabs [aria-selected="true"] { background: rgba(255,214,10,0.2) !important; color: #ffd60a !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 7. 화면: 홈 대시보드
+# 8. HTML5 실시간 줌 컴포넌트
+# ═══════════════════════════════════════════════════════════════
+def html_zoom_viewer(image_pil, height=560):
+    """Streamlit 재실행 없이 실시간 작동하는 HTML5 줌 뷰어.
+    슬라이더/버튼/마우스휠/드래그 모두 지원."""
+    buf = io.BytesIO()
+    img_rgb = image_pil.convert("RGB") if image_pil.mode != "RGB" else image_pil
+    img_rgb.save(buf, format="JPEG", quality=88)
+    img_b64 = base64.b64encode(buf.getvalue()).decode()
+    
+    html_code = f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #fff;">
+        <div id="zoom-wrap" style="
+            background: rgba(0,0,0,0.3); 
+            border-radius: 10px; 
+            padding: 8px; 
+            border: 1px solid rgba(255,255,255,0.15);
+            max-height: {height-90}px;
+            overflow: auto;
+            text-align: center;
+            cursor: grab;
+            user-select: none;
+        ">
+            <img id="zoom-img" 
+                 src="data:image/jpeg;base64,{img_b64}" 
+                 style="width: 100%; max-width: none; 
+                        transition: width 0.05s ease-out;
+                        border-radius: 6px; pointer-events: none;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.3);"
+                 draggable="false">
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; margin-top:10px;
+                    background: rgba(255,255,255,0.08); padding: 8px 12px; border-radius: 10px;">
+            <button id="zoom-out" style="
+                background: #ffd60a; color: #1a1a1a; border: none;
+                width: 36px; height: 36px; border-radius: 8px;
+                font-size: 1.2rem; font-weight: 900; cursor: pointer;
+            ">−</button>
+            <input type="range" id="zoom-slider" 
+                   min="0.3" max="3" step="0.05" value="1"
+                   style="flex: 1; cursor: pointer; accent-color: #ffd60a;">
+            <button id="zoom-in" style="
+                background: #ffd60a; color: #1a1a1a; border: none;
+                width: 36px; height: 36px; border-radius: 8px;
+                font-size: 1.2rem; font-weight: 900; cursor: pointer;
+            ">+</button>
+            <button id="zoom-reset" style="
+                background: rgba(255,255,255,0.15); color: #fff; 
+                border: 1px solid rgba(255,255,255,0.3);
+                padding: 0 12px; height: 36px; border-radius: 8px;
+                font-size: 0.85rem; cursor: pointer;
+            ">초기화</button>
+            <span id="zoom-label" style="
+                color: #ffd60a; font-weight: 700; min-width: 50px; 
+                text-align: right; font-size: 0.95rem;
+            ">1.0x</span>
+        </div>
+        <div style="text-align:center; color:#9fd0ff; font-size:0.78rem; margin-top:6px;">
+            💡 슬라이더 / 버튼 / Ctrl+휠로 실시간 줌 · 드래그로 스크롤
+        </div>
+    </div>
+    
+    <script>
+    (function() {{
+        const img = document.getElementById('zoom-img');
+        const slider = document.getElementById('zoom-slider');
+        const label = document.getElementById('zoom-label');
+        const wrap = document.getElementById('zoom-wrap');
+        const btnIn = document.getElementById('zoom-in');
+        const btnOut = document.getElementById('zoom-out');
+        const btnReset = document.getElementById('zoom-reset');
+        
+        function update() {{
+            const v = parseFloat(slider.value);
+            img.style.width = (v * 100) + '%';
+            label.textContent = v.toFixed(1) + 'x';
+        }}
+        
+        function changeZoom(delta) {{
+            const v = Math.max(0.3, Math.min(3, parseFloat(slider.value) + delta));
+            slider.value = v;
+            update();
+        }}
+        
+        slider.addEventListener('input', update);
+        btnIn.addEventListener('click', () => changeZoom(0.2));
+        btnOut.addEventListener('click', () => changeZoom(-0.2));
+        btnReset.addEventListener('click', () => {{ slider.value = 1; update(); }});
+        
+        wrap.addEventListener('wheel', (e) => {{
+            if (e.ctrlKey || e.metaKey) {{
+                e.preventDefault();
+                changeZoom(e.deltaY > 0 ? -0.1 : 0.1);
+            }}
+        }}, {{ passive: false }});
+        
+        let isDown = false, startX = 0, startY = 0, scrollLeft = 0, scrollTop = 0;
+        wrap.addEventListener('mousedown', (e) => {{
+            isDown = true; wrap.style.cursor = 'grabbing';
+            startX = e.pageX - wrap.offsetLeft; startY = e.pageY - wrap.offsetTop;
+            scrollLeft = wrap.scrollLeft; scrollTop = wrap.scrollTop;
+        }});
+        wrap.addEventListener('mouseup', () => {{ isDown = false; wrap.style.cursor = 'grab'; }});
+        wrap.addEventListener('mouseleave', () => {{ isDown = false; wrap.style.cursor = 'grab'; }});
+        wrap.addEventListener('mousemove', (e) => {{
+            if (!isDown) return;
+            e.preventDefault();
+            wrap.scrollLeft = scrollLeft - (e.pageX - wrap.offsetLeft - startX);
+            wrap.scrollTop = scrollTop - (e.pageY - wrap.offsetTop - startY);
+        }});
+        
+        // 터치 핀치 줌 (모바일)
+        let pinchStart = 0, pinchStartZoom = 1;
+        wrap.addEventListener('touchstart', (e) => {{
+            if (e.touches.length === 2) {{
+                pinchStart = Math.hypot(
+                    e.touches[0].pageX - e.touches[1].pageX,
+                    e.touches[0].pageY - e.touches[1].pageY
+                );
+                pinchStartZoom = parseFloat(slider.value);
+            }}
+        }});
+        wrap.addEventListener('touchmove', (e) => {{
+            if (e.touches.length === 2) {{
+                e.preventDefault();
+                const d = Math.hypot(
+                    e.touches[0].pageX - e.touches[1].pageX,
+                    e.touches[0].pageY - e.touches[1].pageY
+                );
+                const newZoom = Math.max(0.3, Math.min(3, pinchStartZoom * (d / pinchStart)));
+                slider.value = newZoom;
+                update();
+            }}
+        }}, {{ passive: false }});
+    }})();
+    </script>
+    """
+    st.components.v1.html(html_code, height=height)
+
+# ═══════════════════════════════════════════════════════════════
+# 9. 화면: 홈
 # ═══════════════════════════════════════════════════════════════
 def render_home():
     status, days_left, day_num = get_trip_status()
     today = date.today()
 
-    # D-day 카드
     if status == "before":
         st.markdown(f"""
         <div class='dday-card'>
@@ -393,22 +528,28 @@ def render_home():
             <div style='font-weight:700;'>무사 귀국 · 추억 가득한 여행이었기를!</div>
         </div>""", unsafe_allow_html=True)
 
-    # 메인 그리드
     col_left, col_right = st.columns([3, 2])
 
     with col_left:
         st.markdown("#### 📅 오늘의 일정")
-        target_date = today if today in ITINERARY else (TRIP_START if status == "before" else None)
-        if target_date:
-            data = ITINERARY[target_date]
-            label = "오늘" if target_date == today else f"여행 첫날 ({target_date.month}/{target_date.day})"
+        today_key = today.strftime("%Y-%m-%d")
+        target_key = today_key if today_key in st.session_state.itinerary else (
+            TRIP_START.strftime("%Y-%m-%d") if status == "before" else None
+        )
+        if target_key:
+            data = st.session_state.itinerary[target_key]
+            d = date_str_to_obj(target_key)
+            label = "오늘" if target_key == today_key else f"여행 첫날 ({d.month}/{d.day})"
             st.caption(f"{label} · {data['title']}")
-            st.info(f"💡 {data['tip']}")
-            for time_, icon, task in data["items"][:5]:
-                st.markdown(f"""
-                <div class='timeline-item'>
-                    <span class='timeline-time'>{time_}</span> {icon} {task}
-                </div>""", unsafe_allow_html=True)
+            if data.get("tip"):
+                st.info(f"💡 {data['tip']}")
+            for item in data["items"][:5]:
+                if len(item) >= 3:
+                    time_, icon, task = item[0], item[1], item[2]
+                    st.markdown(f"""
+                    <div class='timeline-item'>
+                        <span class='timeline-time'>{time_}</span> {icon} {task}
+                    </div>""", unsafe_allow_html=True)
         else:
             st.info("여행이 종료되었습니다.")
 
@@ -428,8 +569,7 @@ def render_home():
             <div class='card' style='text-align:center;'>
                 <div style='font-size:2rem;'>🌴</div>
                 <div style='color:#ffd60a; font-weight:700; font-size:1.2rem;'>28~32°C</div>
-                <div>5월 깜란 평균 (맑음·습함)</div>
-                <div style='font-size:0.8rem; color:#9fd0ff;'>OpenWeather 키 등록시 실시간</div>
+                <div>5월 깜란 평균</div>
             </div>""", unsafe_allow_html=True)
 
         st.markdown("#### 📊 한눈에")
@@ -437,43 +577,108 @@ def render_home():
         remain = st.session_state.budget - spent
         c1, c2 = st.columns(2)
         c1.metric("남은 예산", f"{remain:,}원")
-        c2.metric("공지", f"{len(st.session_state.notices)}건")
+        c2.metric("인원", f"{len(st.session_state.members)}명")
 
 # ═══════════════════════════════════════════════════════════════
-# 8. 화면: 일정
+# 10. 화면: 일정 (편집 가능)
 # ═══════════════════════════════════════════════════════════════
 def render_itinerary():
-    st.markdown("### 📅 5박 6일 전체 일정")
+    st.markdown("### 📅 5박 6일 일정")
     
+    col_h1, col_h2 = st.columns([3, 1])
+    with col_h1:
+        st.caption("✏️ 편집 모드를 켜면 일정을 자유롭게 수정할 수 있어요")
+    with col_h2:
+        edit_mode = st.toggle("편집 모드", key="itin_edit")
+
     today = date.today()
+    sorted_keys = sorted(st.session_state.itinerary.keys())
+    
     labels = []
-    for d in ITINERARY.keys():
+    for key in sorted_keys:
+        d = date_str_to_obj(key)
         n = (d - TRIP_START).days + 1
         labels.append(f"D{n}·{d.month}/{d.day}({weekday_kr(d)})")
 
     tabs = st.tabs(labels)
-    for tab, (d, data) in zip(tabs, ITINERARY.items()):
+    
+    for tab, key in zip(tabs, sorted_keys):
         with tab:
+            d = date_str_to_obj(key)
+            data = st.session_state.itinerary[key]
+            
             badge = ""
             if d == today:
                 badge = " <span style='background:#ff4b4b; color:#fff; padding:2px 10px; border-radius:12px; font-size:0.75rem;'>오늘</span>"
-            st.markdown(f"<h4 style='color:#ffd60a; margin-bottom:4px;'>{data['title']}{badge}</h4>", unsafe_allow_html=True)
-            st.caption(f"💡 {data['tip']}")
-            st.markdown("<br>", unsafe_allow_html=True)
-            for time_, icon, task in data["items"]:
-                st.markdown(f"""
-                <div class='timeline-item'>
-                    <span class='timeline-time'>{time_}</span> {icon} <b>{task}</b>
-                </div>""", unsafe_allow_html=True)
+            
+            if edit_mode:
+                with st.container(border=True):
+                    new_title = st.text_input("📌 제목", data["title"], key=f"title_{key}")
+                    new_tip = st.text_input("💡 그날의 팁", data.get("tip", ""), key=f"tip_{key}")
+                    
+                    st.session_state.itinerary[key]["title"] = new_title
+                    st.session_state.itinerary[key]["tip"] = new_tip
+                    
+                    st.markdown("**🕐 일정 항목**")
+                    for i, item in enumerate(data["items"]):
+                        c1, c2, c3, c4 = st.columns([2, 1, 5, 1])
+                        with c1:
+                            new_time = st.text_input("시간", item[0], key=f"time_{key}_{i}", label_visibility="collapsed")
+                        with c2:
+                            new_icon = st.text_input("아이콘", item[1], key=f"icon_{key}_{i}", label_visibility="collapsed", max_chars=4)
+                        with c3:
+                            new_task = st.text_input("내용", item[2], key=f"task_{key}_{i}", label_visibility="collapsed")
+                        with c4:
+                            if st.button("🗑️", key=f"del_{key}_{i}", use_container_width=True):
+                                st.session_state.itinerary[key]["items"].pop(i)
+                                st.rerun()
+                        st.session_state.itinerary[key]["items"][i] = [new_time, new_icon, new_task]
+                    
+                    st.markdown("**➕ 새 항목 추가**")
+                    nc1, nc2, nc3, nc4 = st.columns([2, 1, 5, 1])
+                    with nc1:
+                        add_time = st.text_input("시간", key=f"add_time_{key}", placeholder="14:00", label_visibility="collapsed")
+                    with nc2:
+                        add_icon = st.text_input("아이콘", key=f"add_icon_{key}", placeholder="🍜", label_visibility="collapsed", max_chars=4)
+                    with nc3:
+                        add_task = st.text_input("내용", key=f"add_task_{key}", placeholder="할 일", label_visibility="collapsed")
+                    with nc4:
+                        if st.button("➕", key=f"add_btn_{key}", use_container_width=True):
+                            if add_time and add_task:
+                                st.session_state.itinerary[key]["items"].append([
+                                    add_time, add_icon or "📌", add_task
+                                ])
+                                st.rerun()
+            else:
+                st.markdown(f"<h4 style='color:#ffd60a; margin-bottom:4px;'>{data['title']}{badge}</h4>", unsafe_allow_html=True)
+                if data.get("tip"):
+                    st.caption(f"💡 {data['tip']}")
+                st.markdown("<br>", unsafe_allow_html=True)
+                for item in data["items"]:
+                    if len(item) >= 3:
+                        time_, icon, task = item[0], item[1], item[2]
+                        st.markdown(f"""
+                        <div class='timeline-item'>
+                            <span class='timeline-time'>{time_}</span> {icon} <b>{task}</b>
+                        </div>""", unsafe_allow_html=True)
+    
+    if edit_mode:
+        st.markdown("---")
+        if st.button("🔄 일정 기본값 복원", help="모든 일정을 초기 상태로"):
+            st.session_state.itinerary = json.loads(json.dumps(DEFAULT_ITINERARY))
+            st.rerun()
 
 # ═══════════════════════════════════════════════════════════════
-# 9. 화면: AI 비서 + 베트남어
+# 11. 화면: AI 비서
 # ═══════════════════════════════════════════════════════════════
 def render_ai():
     sub_tab1, sub_tab2, sub_tab3 = st.tabs(["🤖 AI 채팅", "🇻🇳 베트남어 회화", "📷 사진 번역"])
 
+    if st.session_state.active_model:
+        st.caption(f"✅ 사용 중인 모델: `{st.session_state.active_model}`")
+
     with sub_tab1:
-        st.markdown("##### 무엇이든 물어보세요 (Gemini 2.5 Flash)")
+        st.markdown("##### 무엇이든 물어보세요")
         st.caption("예: '나트랑 5월 날씨 특징', '쌀국수 종류 알려줘', '아이들과 갈만한 곳'")
         
         chat_box = st.container(height=350)
@@ -486,18 +691,17 @@ def render_ai():
         if prompt:
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.spinner("답변 생성 중..."):
-                # 가족여행 컨텍스트 추가
                 context = f"""당신은 베트남 나트랑/깜란 가족여행 전문 도우미입니다.
-여행 정보: 2026.5.10~5.15, 모벤픽 리조트 깜란 5박, 가족 10명 (4학년·1학년·미취학 아이 포함, 어르신 포함).
+여행: 2026.5.10~5.15, 모벤픽 리조트 깜란 5박, 가족 {len(st.session_state.members)}명 (4학년·1학년·미취학 아이 포함, 어르신 포함).
 한국어로 친절하고 실용적으로, 핵심만 간결하게 답하세요.
 
 질문: {prompt}"""
-                text, err = gemini_call(context, "gemini-2.5-flash")
+                text, err = gemini_call(context)
                 if text:
                     st.session_state.messages.append({"role": "assistant", "content": text})
                     st.rerun()
                 else:
-                    st.error(f"🚨 {err}")
+                    st.error(err)
 
         if st.session_state.messages and st.button("🗑️ 대화 초기화"):
             st.session_state.messages = []
@@ -523,7 +727,7 @@ def render_ai():
         if st.button("번역하기", use_container_width=True) and ko_text:
             with st.spinner("번역 중..."):
                 p = f"""다음 한국어를 베트남어로 번역하고, 한글 발음도 함께 알려주세요.
-형식: 
+형식:
 🇻🇳 베트남어: ...
 🔊 발음: ...
 💡 팁: (있다면 짧게)
@@ -537,17 +741,16 @@ def render_ai():
 
     with sub_tab3:
         st.markdown("##### 📷 메뉴판·간판 사진 번역")
-        st.caption("사진을 찍거나 업로드하면 베트남어를 한국어로 자동 번역해드려요")
+        st.caption("사진 → 실시간 줌으로 확인 → 번역")
 
         if not KEY_GEMINI:
             st.warning("⚠️ Gemini API 키가 필요합니다. Secrets에 등록해주세요.")
             return
 
         mode = st.radio(
-            "입력 방식 선택",
+            "입력 방식",
             ["📷 카메라로 촬영", "📁 갤러리에서 선택"],
-            horizontal=True,
-            key="cam_mode",
+            horizontal=True, key="cam_mode",
         )
 
         img_file = None
@@ -556,14 +759,12 @@ def render_ai():
         else:
             img_file = st.file_uploader(
                 "이미지 파일 선택 (jpg/png)",
-                type=["jpg", "jpeg", "png", "webp"],
-                key="cam_upload",
+                type=["jpg", "jpeg", "png", "webp"], key="cam_upload",
             )
 
         if img_file is not None:
             try:
                 img = Image.open(img_file)
-                # 너무 큰 이미지는 리사이즈 (속도·비용 절약)
                 max_size = 1600
                 if max(img.size) > max_size:
                     ratio = max_size / max(img.size)
@@ -571,54 +772,23 @@ def render_ai():
                     img = img.resize(new_size, Image.LANCZOS)
 
                 col_img, col_opt = st.columns([2, 1])
+                
                 with col_img:
-                    # 🔍 줌 슬라이더 (줌아웃 ↔ 줌인)
-                    zoom = st.slider(
-                        "🔍 보기 크기 (← 줌아웃 / 줌인 →)",
-                        min_value=0.3, max_value=2.5, value=1.0, step=0.1,
-                        format="%.1fx",
-                        key="img_zoom",
-                        help="작게 보려면 왼쪽, 자세히 보려면 오른쪽으로",
-                    )
-                    
-                    # PIL 이미지를 base64로 변환해 HTML로 표시 (줌 + 스크롤 지원)
-                    buf = io.BytesIO()
-                    img_rgb = img.convert("RGB") if img.mode != "RGB" else img
-                    img_rgb.save(buf, format="JPEG", quality=85)
-                    img_b64 = base64.b64encode(buf.getvalue()).decode()
-                    width_pct = int(zoom * 100)
-                    
-                    st.markdown(f"""
-                    <div style="text-align:center; overflow:auto; max-height:500px;
-                                background:rgba(0,0,0,0.25); border-radius:10px; 
-                                padding:8px; border:1px solid rgba(255,255,255,0.1);">
-                        <img src="data:image/jpeg;base64,{img_b64}" 
-                             style="width:{width_pct}%; max-width:none; 
-                                    border-radius:6px;
-                                    box-shadow:0 4px 12px rgba(0,0,0,0.3);">
-                    </div>
-                    <div style="text-align:center; color:#9fd0ff; 
-                                font-size:0.8rem; margin-top:6px;">
-                        📐 현재 {zoom:.1f}배 · 원본 {img.size[0]}×{img.size[1]}px
-                    </div>
-                    """, unsafe_allow_html=True)
+                    html_zoom_viewer(img, height=580)
                     
                 with col_opt:
                     st.markdown("**번역 모드**")
                     translate_mode = st.radio(
                         "선택",
                         ["🍜 메뉴판", "🪧 간판/표지", "📄 일반 문서"],
-                        key="trans_mode",
-                        label_visibility="collapsed",
+                        key="trans_mode", label_visibility="collapsed",
                     )
                     do_translate = st.button(
-                        "🔍 번역 시작",
-                        use_container_width=True,
-                        type="primary",
+                        "🔍 번역 시작", use_container_width=True, type="primary",
                     )
+                    st.caption(f"📐 원본 {img.size[0]}×{img.size[1]}px")
 
                 if do_translate:
-                    # 모드별 프롬프트
                     if "메뉴판" in translate_mode:
                         prompt = """이 이미지는 베트남 음식점 메뉴판입니다. 다음 형식으로 정리해주세요:
 
@@ -628,47 +798,35 @@ def render_ai():
 - 🇻🇳 원문 (베트남어)
 - 🇰🇷 한국어 번역
 - 💵 가격 (있는 경우)
-- 💡 음식 설명 (한 줄, 한국 가족이 먹기 좋은지 / 매운지 / 고수 들어가는지 등)
+- 💡 음식 설명 (한 줄, 매운지/고수 들어가는지 등)
 
-⚠️ **주의사항**: (아이가 먹기 어려운 메뉴, 알레르기 주의 메뉴 등)
+⚠️ **주의사항**: (아이가 먹기 어려운 메뉴, 알레르기 등)
 
-✨ **추천**: 한국 가족(아이 3명 포함)에게 추천할 만한 메뉴 2-3개
-
-이미지에 메뉴가 없으면 "메뉴를 찾을 수 없습니다"라고 답하세요."""
+✨ **추천**: 한국 가족(아이 3명 포함)에게 추천할 메뉴 2-3개"""
                     elif "간판" in translate_mode:
-                        prompt = """이 이미지의 베트남어 간판/표지/안내판을 번역해주세요:
+                        prompt = """이 이미지의 베트남어 간판/표지를 번역해주세요:
 
-📝 **원문**: (베트남어 그대로)
-🇰🇷 **번역**: (자연스러운 한국어)
-📍 **장소·용도**: (어떤 곳인지, 무슨 안내인지)
-💡 **참고 정보**: (관광객이 알면 좋을 점, 주의사항 등)
-
-이미지에 베트남어가 없으면 그렇게 답해주세요."""
+📝 **원문**:
+🇰🇷 **번역**:
+📍 **장소·용도**:
+💡 **참고**:"""
                     else:
                         prompt = """이 이미지의 베트남어 텍스트를 한국어로 번역해주세요:
 
 📝 **원문 (베트남어)**:
-
 🇰🇷 **번역 (한국어)**:
-
-💡 **추가 설명**: (필요시 맥락 설명)
-
-이미지에 베트남어 텍스트가 없으면 그렇게 답해주세요."""
+💡 **추가 설명**:"""
 
                     with st.spinner("🔎 이미지 분석 중... (5~15초)"):
                         text, err = gemini_vision(prompt, img)
                         if text:
                             st.success(text)
-                            # 결과 다시보기용 저장
-                            st.session_state["last_translation"] = text
                         else:
-                            st.error(f"🚨 분석 실패: {err}")
-                            st.info("💡 사진이 너무 어둡거나 흐릿하면 인식이 어려워요. 밝은 곳에서 다시 찍어보세요.")
+                            st.error(err)
 
             except Exception as e:
                 st.error(f"이미지 처리 오류: {e}")
 
-        # 사용 팁
         with st.expander("💡 더 정확하게 번역받는 팁"):
             st.markdown("""
             - **밝은 곳에서 촬영** — 그림자 없이 정면에서
@@ -679,38 +837,86 @@ def render_ai():
             """)
 
 # ═══════════════════════════════════════════════════════════════
-# 10. 화면: 가족 (위치 + 공지 + 미션)
+# 12. 화면: 가족 (인원 편집 포함)
 # ═══════════════════════════════════════════════════════════════
 def render_family():
-    sub1, sub2, sub3 = st.tabs(["📍 위치 체크인", "📢 가족 공지", "🕵️ 아이 미션"])
+    sub1, sub2, sub3, sub4 = st.tabs(["📍 위치 체크인", "👥 인원 관리", "📢 공지", "🕵️ 미션"])
 
     with sub1:
         st.markdown("##### 누가 어디에 있나요?")
-        c1, c2, c3 = st.columns([2, 2, 1])
-        with c1:
-            who = st.selectbox("가족", FAMILY_MEMBERS, key="loc_who")
-        with c2:
-            where = st.selectbox("위치", LOCATIONS, key="loc_where")
-        with c3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("✓ 체크인", use_container_width=True):
-                st.session_state.locations[who] = where
-                st.rerun()
+        if not st.session_state.members:
+            st.warning("먼저 '인원 관리' 탭에서 가족을 추가해주세요.")
+        else:
+            c1, c2, c3 = st.columns([2, 2, 1])
+            with c1:
+                who = st.selectbox("가족", st.session_state.members, key="loc_who")
+            with c2:
+                where = st.selectbox("위치", LOCATIONS, key="loc_where")
+            with c3:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("✓ 체크인", use_container_width=True):
+                    st.session_state.locations[who] = where
+                    st.rerun()
 
-        st.markdown("---")
-        st.markdown("##### 현재 가족 위치")
-        summary = {}
-        for m, loc in st.session_state.locations.items():
-            summary.setdefault(loc, []).append(m)
-        for loc, members in summary.items():
-            pills = " ".join([f"<span class='location-pill'>{m}</span>" for m in members])
-            st.markdown(f"""
-            <div class='card'>
-                <div class='card-title'>{loc} ({len(members)}명)</div>
-                {pills}
-            </div>""", unsafe_allow_html=True)
+            st.markdown("---")
+            st.markdown("##### 현재 가족 위치")
+            summary = {}
+            for m, loc in st.session_state.locations.items():
+                if m in st.session_state.members:
+                    summary.setdefault(loc, []).append(m)
+            for loc, members in summary.items():
+                pills = " ".join([f"<span class='location-pill'>{m}</span>" for m in members])
+                st.markdown(f"""
+                <div class='card'>
+                    <div class='card-title'>{loc} ({len(members)}명)</div>
+                    {pills}
+                </div>""", unsafe_allow_html=True)
 
     with sub2:
+        st.markdown(f"##### 👥 여행 인원 관리 (현재 {len(st.session_state.members)}명)")
+        
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            new_member = st.text_input("새 가족 추가", placeholder="예: 사촌 동생", key="new_mem", label_visibility="collapsed")
+        with c2:
+            if st.button("➕ 추가", use_container_width=True):
+                if new_member and new_member not in st.session_state.members:
+                    st.session_state.members.append(new_member)
+                    st.session_state.locations[new_member] = "🏨 모벤픽"
+                    st.rerun()
+                elif new_member in st.session_state.members:
+                    st.warning("이미 존재하는 이름입니다")
+        
+        st.markdown("---")
+        st.caption("이름 클릭으로 수정, 🗑️ 버튼으로 삭제")
+        
+        for i, m in enumerate(st.session_state.members):
+            c1, c2 = st.columns([5, 1])
+            with c1:
+                new_name = st.text_input(
+                    f"member_{i}", m, 
+                    key=f"mem_input_{i}", 
+                    label_visibility="collapsed",
+                )
+                if new_name != m and new_name and new_name not in st.session_state.members:
+                    if m in st.session_state.locations:
+                        st.session_state.locations[new_name] = st.session_state.locations.pop(m)
+                    st.session_state.members[i] = new_name
+                    st.rerun()
+            with c2:
+                if st.button("🗑️", key=f"mem_del_{i}", use_container_width=True):
+                    if m in st.session_state.locations:
+                        del st.session_state.locations[m]
+                    st.session_state.members.pop(i)
+                    st.rerun()
+        
+        st.markdown("---")
+        if st.button("🔄 기본값으로 복원", help="기본 10명으로 되돌립니다"):
+            st.session_state.members = list(DEFAULT_MEMBERS)
+            st.session_state.locations = {m: "🏨 모벤픽" for m in DEFAULT_MEMBERS}
+            st.rerun()
+
+    with sub3:
         st.markdown("##### 새 공지 등록")
         c1, c2 = st.columns([1, 3])
         with c1:
@@ -727,25 +933,27 @@ def render_family():
             st.rerun()
 
         st.markdown("---")
-        st.markdown("##### 공지 목록")
-        for n in st.session_state.notices:
+        for i, n in enumerate(st.session_state.notices):
             color = "#ff4b4b" if "긴급" in n["level"] else ("#ffd60a" if "일정" in n["level"] else "#9fd0ff")
-            st.markdown(f"""
-            <div class='card' style='border-left:4px solid {color};'>
-                <b>{n['icon']} {n['level']}</b> · {n['text']}
-                <div style='font-size:0.8rem; color:#9fd0ff; margin-top:4px;'>{n['time']}</div>
-            </div>""", unsafe_allow_html=True)
+            c1, c2 = st.columns([10, 1])
+            with c1:
+                st.markdown(f"""
+                <div class='card' style='border-left:4px solid {color};'>
+                    <b>{n['icon']} {n['level']}</b> · {n['text']}
+                    <div style='font-size:0.8rem; color:#9fd0ff; margin-top:4px;'>{n['time']}</div>
+                </div>""", unsafe_allow_html=True)
+            with c2:
+                if st.button("🗑️", key=f"noti_del_{i}"):
+                    st.session_state.notices.pop(i)
+                    st.rerun()
 
-    with sub3:
+    with sub4:
         st.markdown("##### 아이들을 위한 오늘의 미션 🎯")
-        st.caption("4학년·1학년 아이가 즐길 수 있는 작은 챌린지")
-        
         if st.button("🎲 새 미션 뽑기", use_container_width=True):
             with st.spinner("미션 생성 중..."):
-                p = """나트랑 가족 여행 중인 4학년, 1학년 아이들이 함께 즐길 수 있는 짧은 미션 4개를 만들어주세요.
-관광지, 식당, 리조트에서 안전하게 할 수 있는 활동이어야 합니다.
-JSON 배열로만 응답하세요. 다른 설명은 절대 넣지 마세요.
-형식: [{"emoji":"🍉","title":"미션이름","points":10}, ...]"""
+                p = """나트랑 가족여행 중 4학년·1학년 아이들이 함께할 미션 4개.
+JSON 배열로만 응답: [{"emoji":"🍉","title":"미션이름","points":10}, ...]
+다른 설명 없이 JSON만."""
                 text, err = gemini_call(p)
                 if text:
                     match = re.search(r"\[.*\]", text, re.DOTALL)
@@ -754,13 +962,12 @@ JSON 배열로만 응답하세요. 다른 설명은 절대 넣지 마세요.
                             st.session_state.missions = json.loads(match.group(0))
                             st.rerun()
                         except json.JSONDecodeError:
-                            st.error("미션 형식 파싱 실패. 다시 시도해주세요.")
+                            st.error("미션 형식 파싱 실패")
                 else:
                     st.error(err)
 
         if st.session_state.missions:
-            total_done = 0
-            total_points = 0
+            total_done = total_points = 0
             for i, m in enumerate(st.session_state.missions):
                 done = st.checkbox(
                     f"{m.get('emoji','🎯')} **{m.get('title','미션')}** · +{m.get('points',10)}점",
@@ -772,12 +979,21 @@ JSON 배열로만 응답하세요. 다른 설명은 절대 넣지 마세요.
             st.success(f"✅ 완료 {total_done}/{len(st.session_state.missions)} · 누적 {total_points}점")
 
 # ═══════════════════════════════════════════════════════════════
-# 11. 화면: 가계부 (지출 + 환율)
+# 13. 화면: 가계부
 # ═══════════════════════════════════════════════════════════════
 def render_budget():
     sub1, sub2 = st.tabs(["💰 공동 가계부", "💱 환율 계산기"])
 
     with sub1:
+        with st.expander("⚙️ 예산 설정"):
+            new_budget = st.number_input(
+                "총 예산 (원)", min_value=0, 
+                value=st.session_state.budget, step=100000,
+            )
+            if new_budget != st.session_state.budget:
+                st.session_state.budget = new_budget
+                st.rerun()
+        
         st.markdown("##### 새 지출 등록")
         c1, c2, c3 = st.columns([1, 1, 2])
         with c1:
@@ -799,78 +1015,136 @@ def render_budget():
         c1, c2, c3 = st.columns(3)
         c1.metric("총 예산", f"{st.session_state.budget:,}원")
         c2.metric("지출", f"{spent:,}원")
-        c3.metric("남은 금액", f"{remain:,}원", delta=None)
-        st.progress(min(spent / st.session_state.budget, 1.0) if st.session_state.budget else 0)
+        c3.metric("남은 금액", f"{remain:,}원")
+        if st.session_state.budget:
+            st.progress(min(spent / st.session_state.budget, 1.0))
 
         st.markdown("##### 최근 지출")
         if not st.session_state.expenses:
             st.info("아직 등록된 지출이 없습니다.")
-        for e in reversed(st.session_state.expenses[-10:]):
-            st.markdown(f"""
-            <div class='card'>
-                <b>{e['cat']}</b> · {e['desc'] or '(내용 없음)'}
-                <span style='float:right; color:#ffd60a; font-weight:700;'>{e['amt']:,}원</span>
-                <div style='font-size:0.8rem; color:#9fd0ff;'>{e.get('time','')}</div>
-            </div>""", unsafe_allow_html=True)
+        for i, e in enumerate(reversed(st.session_state.expenses[-10:])):
+            real_idx = len(st.session_state.expenses) - 1 - i
+            c1, c2 = st.columns([10, 1])
+            with c1:
+                st.markdown(f"""
+                <div class='card'>
+                    <b>{e['cat']}</b> · {e['desc'] or '(내용 없음)'}
+                    <span style='float:right; color:#ffd60a; font-weight:700;'>{e['amt']:,}원</span>
+                    <div style='font-size:0.8rem; color:#9fd0ff;'>{e.get('time','')}</div>
+                </div>""", unsafe_allow_html=True)
+            with c2:
+                if st.button("🗑️", key=f"exp_del_{real_idx}"):
+                    st.session_state.expenses.pop(real_idx)
+                    st.rerun()
 
     with sub2:
         st.markdown("##### 빠른 환율 계산")
-        st.caption("기준: 1원 ≈ 18.5동, 1달러 ≈ 1,370원 (대략적 계산용)")
+        st.caption("기준: 1원 ≈ 18.5동, 1달러 ≈ 1,370원")
         
         t1, t2, t3 = st.tabs(["원 → 동", "동 → 원", "달러 → 원"])
         with t1:
             krw = st.number_input("원화 (KRW)", min_value=0, value=50000, step=10000, key="krw1")
             if krw > 0:
-                vnd = krw * 18.5
-                usd = krw / 1370
                 st.markdown(f"""
                 <div class='card'>
-                    🇻🇳 약 <b style='color:#ffd60a; font-size:1.3rem;'>{vnd:,.0f} VND</b><br>
-                    🇺🇸 약 <b style='color:#ffd60a; font-size:1.1rem;'>${usd:,.2f} USD</b>
+                    🇻🇳 약 <b style='color:#ffd60a; font-size:1.3rem;'>{krw*18.5:,.0f} VND</b><br>
+                    🇺🇸 약 <b style='color:#ffd60a; font-size:1.1rem;'>${krw/1370:,.2f} USD</b>
                 </div>""", unsafe_allow_html=True)
 
         with t2:
             vnd = st.number_input("베트남동 (VND)", min_value=0, value=100000, step=50000, key="vnd1")
             if vnd > 0:
-                krw = vnd / 18.5
                 st.markdown(f"""
                 <div class='card'>
-                    🇰🇷 약 <b style='color:#ffd60a; font-size:1.3rem;'>{krw:,.0f}원</b>
+                    🇰🇷 약 <b style='color:#ffd60a; font-size:1.3rem;'>{vnd/18.5:,.0f}원</b>
                 </div>""", unsafe_allow_html=True)
-                st.info("💡 꿀팁: VND에서 0 하나 빼고 ÷2 하면 대충 원화! (10만동 ≈ 5천원)")
+                st.info("💡 꿀팁: VND에서 0 하나 빼고 ÷2 (10만동 ≈ 5천원)")
 
         with t3:
             usd = st.number_input("미국달러 (USD)", min_value=0.0, value=10.0, step=10.0, key="usd1")
             if usd > 0:
-                krw = usd * 1370
-                vnd = usd * 25400
                 st.markdown(f"""
                 <div class='card'>
-                    🇰🇷 약 <b style='color:#ffd60a; font-size:1.3rem;'>{krw:,.0f}원</b><br>
-                    🇻🇳 약 <b style='color:#ffd60a; font-size:1.1rem;'>{vnd:,.0f} VND</b>
+                    🇰🇷 약 <b style='color:#ffd60a; font-size:1.3rem;'>{usd*1370:,.0f}원</b><br>
+                    🇻🇳 약 <b style='color:#ffd60a; font-size:1.1rem;'>{usd*25400:,.0f} VND</b>
                 </div>""", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 12. 화면: 준비 (짐 + 비상)
+# 14. 화면: 준비 (편집 가능 짐 + 비상)
 # ═══════════════════════════════════════════════════════════════
 def render_prep():
     sub1, sub2 = st.tabs(["🎒 짐 체크리스트", "🚨 비상 연락처"])
 
     with sub1:
         st.markdown("##### 5박 6일 짐 챙기기")
-        all_items = []
-        for cat, items in PACKING_LIST.items():
-            with st.expander(f"**{cat}** ({len(items)}개)", expanded=True):
-                for i, item in enumerate(items):
-                    key = f"pack_{cat}_{i}"
-                    checked = st.checkbox(item, key=key)
-                    all_items.append(checked)
+        edit_mode = st.toggle("✏️ 편집 모드", key="pack_edit", help="항목/카테고리 추가·삭제·수정")
         
-        done = sum(all_items)
-        total = len(all_items)
-        st.markdown("---")
-        st.progress(done / total if total else 0)
-        st.markdown(f"<center><b>준비 완료: {done} / {total}</b></center>", unsafe_allow_html=True)
+        all_done = []
+        for cat in list(st.session_state.packing.keys()):
+            items = st.session_state.packing[cat]
+            with st.expander(f"**{cat}** ({len(items)}개)", expanded=True):
+                if edit_mode:
+                    for i, item in enumerate(items):
+                        c1, c2 = st.columns([5, 1])
+                        with c1:
+                            new_item = st.text_input(
+                                f"item_{cat}_{i}", item,
+                                key=f"pack_item_{cat}_{i}",
+                                label_visibility="collapsed",
+                            )
+                            if new_item != item and new_item:
+                                st.session_state.packing[cat][i] = new_item
+                        with c2:
+                            if st.button("🗑️", key=f"pack_del_{cat}_{i}", use_container_width=True):
+                                st.session_state.packing[cat].pop(i)
+                                st.rerun()
+                    
+                    nc1, nc2 = st.columns([5, 1])
+                    with nc1:
+                        new_pack = st.text_input(
+                            "새 항목", key=f"pack_add_{cat}",
+                            placeholder="추가할 짐", label_visibility="collapsed",
+                        )
+                    with nc2:
+                        if st.button("➕", key=f"pack_add_btn_{cat}", use_container_width=True):
+                            if new_pack:
+                                st.session_state.packing[cat].append(new_pack)
+                                st.rerun()
+                else:
+                    for i, item in enumerate(items):
+                        key = f"chk_{cat}_{i}"
+                        checked = st.checkbox(item, key=key)
+                        all_done.append(checked)
+        
+        if edit_mode:
+            st.markdown("---")
+            st.markdown("##### 📂 카테고리 관리")
+            cc1, cc2 = st.columns([5, 1])
+            with cc1:
+                new_cat = st.text_input("새 카테고리", placeholder="예: 🧳 의류", label_visibility="collapsed", key="new_cat_input")
+            with cc2:
+                if st.button("➕ 추가", use_container_width=True, key="cat_add"):
+                    if new_cat and new_cat not in st.session_state.packing:
+                        st.session_state.packing[new_cat] = []
+                        st.rerun()
+            
+            if len(st.session_state.packing) > 0:
+                del_cat = st.selectbox("삭제할 카테고리", [""] + list(st.session_state.packing.keys()), key="cat_del_sel")
+                if del_cat and st.button("⚠️ 카테고리 통째로 삭제", key="cat_del_btn"):
+                    del st.session_state.packing[del_cat]
+                    st.rerun()
+            
+            st.markdown("---")
+            if st.button("🔄 짐 목록 기본값 복원"):
+                st.session_state.packing = json.loads(json.dumps(DEFAULT_PACKING))
+                st.rerun()
+        else:
+            done = sum(all_done)
+            total = len(all_done)
+            st.markdown("---")
+            if total:
+                st.progress(done / total)
+            st.markdown(f"<center><b>준비 완료: {done} / {total}</b></center>", unsafe_allow_html=True)
 
     with sub2:
         st.markdown("##### 위급 상황 대비")
@@ -891,35 +1165,29 @@ def render_prep():
             <ol style='color:#fff; padding-left:20px; line-height:1.8;'>
                 <li>가족 안전 먼저 확보 (인원수 체크)</li>
                 <li>호텔 프론트 또는 한국대사관 영사콜센터 연락</li>
-                <li>여행자보험 회사에도 연락 (영수증·진단서 보관)</li>
+                <li>여행자보험 회사 연락 (영수증·진단서 보관)</li>
                 <li>여권 분실시 → 대사관 → 임시여권 발급</li>
             </ol>
         </div>""", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 13. 메인
+# 15. 메인
 # ═══════════════════════════════════════════════════════════════
 def main():
     st.markdown('<p class="main-title">🌴 나트랑 패밀리 베이스캠프</p>', unsafe_allow_html=True)
     st.markdown(
-        f"<p class='subtitle'>2026.05.10 (일) ~ 05.15 (금) · 모벤픽 리조트 깜란 5박 6일 · 대가족 10명</p>",
+        f"<p class='subtitle'>2026.05.10 (일) ~ 05.15 (금) · 모벤픽 리조트 깜란 · 가족 {len(st.session_state.members)}명</p>",
         unsafe_allow_html=True,
     )
 
     tabs = st.tabs(["🏠 홈", "📅 일정", "🤖 AI비서", "👨‍👩‍👧‍👦 가족", "💰 가계부", "🎒 준비"])
 
-    with tabs[0]:
-        render_home()
-    with tabs[1]:
-        render_itinerary()
-    with tabs[2]:
-        render_ai()
-    with tabs[3]:
-        render_family()
-    with tabs[4]:
-        render_budget()
-    with tabs[5]:
-        render_prep()
+    with tabs[0]: render_home()
+    with tabs[1]: render_itinerary()
+    with tabs[2]: render_ai()
+    with tabs[3]: render_family()
+    with tabs[4]: render_budget()
+    with tabs[5]: render_prep()
 
 
 if __name__ == "__main__":
