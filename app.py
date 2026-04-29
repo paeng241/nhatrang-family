@@ -661,80 +661,385 @@ def render_home():
         c2.metric("인원", f"{len(st.session_state.members)}명")
 
 # ═══════════════════════════════════════════════════════════════
-# 9-2. 화면: 구글 지도
+# 9-2. 화면: 실시간 인터랙티브 지도 (Leaflet + Google Maps 토글)
 # ═══════════════════════════════════════════════════════════════
+def render_map_leaflet():
+    """무료 Leaflet 모드 - API 키 불필요, 12개 마커 한번에 표시"""
+    places_json = json.dumps(PLACES, ensure_ascii=False)
+    avg_lat = sum(p["lat"] for p in PLACES) / len(PLACES)
+    avg_lon = sum(p["lon"] for p in PLACES) / len(PLACES)
+    
+    leaflet_html = f"""
+    <link rel="stylesheet" 
+          href="https://unpkg.com/[email protected]/dist/leaflet.css"
+          crossorigin=""/>
+    <script src="https://unpkg.com/[email protected]/dist/leaflet.js"
+            crossorigin=""></script>
+    
+    <style>
+        .leaflet-popup-content-wrapper {{
+            border-radius: 10px !important;
+            background: #1a4d7a !important;
+            color: #fff !important;
+        }}
+        .leaflet-popup-content {{ margin: 12px 14px !important; min-width: 200px; }}
+        .leaflet-popup-tip {{ background: #1a4d7a !important; }}
+        .leaflet-container {{
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            border-radius: 12px;
+        }}
+        .leaflet-control-zoom a {{
+            background-color: #ffd60a !important;
+            color: #1a1a1a !important;
+            border: none !important;
+            font-weight: 900;
+        }}
+        .marker-pin {{
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            border: 2px solid #fff;
+        }}
+    </style>
+    
+    <div id="map-leaflet" style="height: 520px; width: 100%; border-radius: 12px;
+                                  box-shadow: 0 6px 20px rgba(0,0,0,0.25);"></div>
+    
+    <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;">
+        <button onclick="window._fitAllL()" style="
+            background: #ffd60a; color: #1a1a1a; border: none;
+            padding: 8px 14px; border-radius: 8px; font-weight: 700;
+            cursor: pointer; flex: 1; min-width: 100px;
+        ">🗺️ 전체 보기</button>
+        <button onclick="window._goHotelL()" style="
+            background: #ff4b4b; color: #fff; border: none;
+            padding: 8px 14px; border-radius: 8px; font-weight: 700;
+            cursor: pointer; flex: 1; min-width: 100px;
+        ">🏨 호텔로</button>
+        <button onclick="window._goNTL()" style="
+            background: #2c7da0; color: #fff; border: none;
+            padding: 8px 14px; border-radius: 8px; font-weight: 700;
+            cursor: pointer; flex: 1; min-width: 100px;
+        ">🎡 나트랑</button>
+    </div>
+    
+    <script>
+    (function() {{
+        const places = {places_json};
+        const hotel = places[0];
+        
+        const map = L.map('map-leaflet').setView([{avg_lat}, {avg_lon}], 11);
+        
+        L.tileLayer('https://{{s}}.basemaps.cartocdn.com/voyager/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+            attribution: '© OpenStreetMap · © CARTO',
+            maxZoom: 19, subdomains: 'abcd',
+        }}).addTo(map);
+        
+        function distKm(lat1, lon1, lat2, lon2) {{
+            const R = 6371;
+            const p1 = lat1 * Math.PI / 180, p2 = lat2 * Math.PI / 180;
+            const dp = (lat2-lat1) * Math.PI / 180, dl = (lon2-lon1) * Math.PI / 180;
+            const a = Math.sin(dp/2)**2 + Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+            return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }}
+        
+        function makeIcon(emoji, isHotel) {{
+            const bg = isHotel ? '#ff4b4b' : '#ffd60a';
+            const color = isHotel ? '#fff' : '#1a1a1a';
+            const size = isHotel ? 44 : 36;
+            return L.divIcon({{
+                html: `<div class="marker-pin" style="
+                    background: ${{bg}}; color: ${{color}};
+                    width: ${{size}}px; height: ${{size}}px;
+                    border-radius: 50%; font-size: ${{isHotel ? '1.4rem' : '1.1rem'}};
+                ">${{emoji}}</div>`,
+                iconSize: [size, size], iconAnchor: [size/2, size/2],
+                popupAnchor: [0, -size/2], className: '',
+            }});
+        }}
+        
+        const markers = [];
+        places.forEach((p, i) => {{
+            const isHotel = i === 0;
+            const emoji = p.name.split(' ')[0];
+            const dist = isHotel ? '🏠 우리 숙소' : `🏨 호텔에서 ${{distKm(hotel.lat, hotel.lon, p.lat, p.lon).toFixed(1)}}km`;
+            const placeUrl = `https://www.google.com/maps/search/?api=1&query=${{p.lat}},${{p.lon}}`;
+            const dirUrl = `https://www.google.com/maps/dir/?api=1&origin=${{hotel.lat}},${{hotel.lon}}&destination=${{p.lat}},${{p.lon}}`;
+            
+            const popup = `
+                <div>
+                    <div style="font-weight:800; font-size:1rem; color:#ffd60a; margin-bottom:4px;">${{p.name}}</div>
+                    <div style="font-size:0.85rem; color:#cfe8ff; margin-bottom:6px;">${{p.info}}</div>
+                    <div style="font-size:0.8rem; color:#9fd0ff; margin-bottom:10px;">${{dist}}</div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <a href="${{placeUrl}}" target="_blank" style="
+                            background: #4285f4; color: white; padding: 6px 10px;
+                            border-radius: 6px; text-decoration: none; font-size: 0.78rem; font-weight: 600;
+                        ">📱 구글지도</a>
+                        ${{!isHotel ? `<a href="${{dirUrl}}" target="_blank" style="
+                            background: #34a853; color: white; padding: 6px 10px;
+                            border-radius: 6px; text-decoration: none; font-size: 0.78rem; font-weight: 600;
+                        ">🚗 길찾기</a>` : ''}}
+                    </div>
+                </div>`;
+            
+            const marker = L.marker([p.lat, p.lon], {{ icon: makeIcon(emoji, isHotel) }})
+                .addTo(map).bindPopup(popup, {{ maxWidth: 280 }});
+            markers.push(marker);
+        }});
+        
+        const ntCenter = places.find(p => p.name.includes('야시장'));
+        if (ntCenter) {{
+            L.polyline([[hotel.lat, hotel.lon], [ntCenter.lat, ntCenter.lon]], {{
+                color: '#ffd60a', weight: 2, opacity: 0.5, dashArray: '8, 8',
+            }}).addTo(map);
+        }}
+        
+        const group = L.featureGroup(markers);
+        map.fitBounds(group.getBounds().pad(0.15));
+        
+        window._fitAllL = () => map.fitBounds(group.getBounds().pad(0.15));
+        window._goHotelL = () => {{ map.setView([hotel.lat, hotel.lon], 15); markers[0].openPopup(); }};
+        window._goNTL = () => map.setView([12.245, 109.190], 14);
+    }})();
+    </script>
+    """
+    st.components.v1.html(leaflet_html, height=620)
+
+
+def render_map_google(api_key):
+    """진짜 Google Maps JavaScript API - API 키 필요"""
+    places_json = json.dumps(PLACES, ensure_ascii=False)
+    avg_lat = sum(p["lat"] for p in PLACES) / len(PLACES)
+    avg_lon = sum(p["lon"] for p in PLACES) / len(PLACES)
+    
+    google_html = f"""
+    <div id="map-google" style="height: 520px; width: 100%; border-radius: 12px;
+                                 box-shadow: 0 6px 20px rgba(0,0,0,0.25);"></div>
+    
+    <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;">
+        <button onclick="window._fitAllG()" style="
+            background: #ffd60a; color: #1a1a1a; border: none;
+            padding: 8px 14px; border-radius: 8px; font-weight: 700;
+            cursor: pointer; flex: 1; min-width: 100px;
+        ">🗺️ 전체 보기</button>
+        <button onclick="window._goHotelG()" style="
+            background: #ff4b4b; color: #fff; border: none;
+            padding: 8px 14px; border-radius: 8px; font-weight: 700;
+            cursor: pointer; flex: 1; min-width: 100px;
+        ">🏨 호텔로</button>
+        <button onclick="window._goNTG()" style="
+            background: #2c7da0; color: #fff; border: none;
+            padding: 8px 14px; border-radius: 8px; font-weight: 700;
+            cursor: pointer; flex: 1; min-width: 100px;
+        ">🎡 나트랑</button>
+    </div>
+    
+    <script>
+    function initGoogleMap() {{
+        const places = {places_json};
+        const hotel = places[0];
+        
+        const map = new google.maps.Map(document.getElementById('map-google'), {{
+            center: {{ lat: {avg_lat}, lng: {avg_lon} }},
+            zoom: 11,
+            mapTypeControl: true,
+            streetViewControl: true,
+            fullscreenControl: true,
+        }});
+        
+        function distKm(lat1, lon1, lat2, lon2) {{
+            const R = 6371;
+            const p1 = lat1 * Math.PI / 180, p2 = lat2 * Math.PI / 180;
+            const dp = (lat2-lat1) * Math.PI / 180, dl = (lon2-lon1) * Math.PI / 180;
+            const a = Math.sin(dp/2)**2 + Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+            return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }}
+        
+        const bounds = new google.maps.LatLngBounds();
+        const markers = [];
+        const infoWindow = new google.maps.InfoWindow();
+        
+        places.forEach((p, i) => {{
+            const isHotel = i === 0;
+            const emoji = p.name.split(' ')[0];
+            const dist = isHotel ? '🏠 우리 숙소' : `🏨 호텔에서 ${{distKm(hotel.lat, hotel.lon, p.lat, p.lon).toFixed(1)}}km`;
+            
+            const marker = new google.maps.Marker({{
+                position: {{ lat: p.lat, lng: p.lon }},
+                map: map,
+                title: p.name,
+                label: {{
+                    text: emoji,
+                    fontSize: isHotel ? '20px' : '16px',
+                }},
+                icon: {{
+                    path: google.maps.SymbolPath.CIRCLE,
+                    fillColor: isHotel ? '#ff4b4b' : '#ffd60a',
+                    fillOpacity: 1,
+                    strokeColor: '#fff',
+                    strokeWeight: 2,
+                    scale: isHotel ? 22 : 18,
+                }},
+                zIndex: isHotel ? 999 : 1,
+            }});
+            
+            const placeUrl = `https://www.google.com/maps/search/?api=1&query=${{p.lat}},${{p.lon}}`;
+            const dirUrl = `https://www.google.com/maps/dir/?api=1&origin=${{hotel.lat}},${{hotel.lon}}&destination=${{p.lat}},${{p.lon}}`;
+            
+            const content = `
+                <div style="min-width:220px; font-family:-apple-system,sans-serif;">
+                    <div style="font-weight:800; font-size:1rem; margin-bottom:4px;">${{p.name}}</div>
+                    <div style="font-size:0.88rem; color:#555; margin-bottom:6px;">${{p.info}}</div>
+                    <div style="font-size:0.82rem; color:#888; margin-bottom:10px;">${{dist}}</div>
+                    <div style="display:flex; gap:6px;">
+                        <a href="${{placeUrl}}" target="_blank" style="
+                            background:#4285f4; color:white; padding:6px 10px;
+                            border-radius:6px; text-decoration:none; font-size:0.78rem; font-weight:600;
+                        ">📱 구글지도</a>
+                        ${{!isHotel ? `<a href="${{dirUrl}}" target="_blank" style="
+                            background:#34a853; color:white; padding:6px 10px;
+                            border-radius:6px; text-decoration:none; font-size:0.78rem; font-weight:600;
+                        ">🚗 길찾기</a>` : ''}}
+                    </div>
+                </div>`;
+            
+            marker.addListener('click', () => {{
+                infoWindow.setContent(content);
+                infoWindow.open(map, marker);
+            }});
+            
+            markers.push(marker);
+            bounds.extend(marker.getPosition());
+        }});
+        
+        // 호텔→야시장 점선
+        const ntCenter = places.find(p => p.name.includes('야시장'));
+        if (ntCenter) {{
+            new google.maps.Polyline({{
+                path: [
+                    {{ lat: hotel.lat, lng: hotel.lon }},
+                    {{ lat: ntCenter.lat, lng: ntCenter.lon }}
+                ],
+                geodesic: true,
+                strokeColor: '#ffd60a',
+                strokeOpacity: 0,
+                icons: [{{
+                    icon: {{ path: 'M 0,-1 0,1', strokeOpacity: 0.6, scale: 3 }},
+                    offset: '0', repeat: '15px',
+                }}],
+                map: map,
+            }});
+        }}
+        
+        map.fitBounds(bounds);
+        
+        window._fitAllG = () => map.fitBounds(bounds);
+        window._goHotelG = () => {{
+            map.setCenter({{ lat: hotel.lat, lng: hotel.lon }});
+            map.setZoom(15);
+            new google.maps.event.trigger(markers[0], 'click');
+        }};
+        window._goNTG = () => {{
+            map.setCenter({{ lat: 12.245, lng: 109.190 }});
+            map.setZoom(14);
+        }};
+    }}
+    </script>
+    <script async defer
+        src="https://maps.googleapis.com/maps/api/js?key={api_key}&callback=initGoogleMap&language=ko&region=KR">
+    </script>
+    """
+    st.components.v1.html(google_html, height=620)
+
+
 def render_map():
-    st.markdown("### 🗺️ 깜란 & 나트랑 명소 지도")
-    st.caption("주요 명소를 선택하면 구글 지도에서 위치를 보여줍니다")
+    st.markdown("### 🗺️ 깜란 & 나트랑 실시간 지도")
     
-    # 호텔 좌표 (거리 계산 기준)
+    # ─ Google API 키 확인 ─
+    google_key = ""
+    try:
+        google_key = st.secrets["api_keys"]["google_maps"]
+    except Exception:
+        pass
+    
+    # ─ 모드 토글 ─
+    col_mode, col_info = st.columns([2, 3])
+    with col_mode:
+        if google_key:
+            mode = st.radio(
+                "지도 모드",
+                ["🟢 Leaflet (무료)", "🔵 Google Maps (실시간)"],
+                horizontal=False,
+                key="map_mode",
+                label_visibility="collapsed",
+            )
+        else:
+            mode = "🟢 Leaflet (무료)"
+            st.info("🟢 Leaflet 모드 사용 중")
+    
+    with col_info:
+        if "Google" in mode:
+            st.caption("✅ 진짜 구글지도 · 스트리트뷰·교통상황 모두 사용 가능")
+        else:
+            st.caption("📌 모든 명소가 한 지도에 · 마커 클릭 → 정보 확인 · API 키 불필요")
+            if not google_key:
+                with st.expander("🔵 진짜 구글지도 사용하고 싶다면?"):
+                    st.markdown("""
+                    1. https://console.cloud.google.com 접속
+                    2. **Maps JavaScript API** 활성화
+                    3. API 키 발급 (월 $200 무료 크레딧)
+                    4. `.streamlit/secrets.toml`에 추가:
+                    ```toml
+                    [api_keys]
+                    google_maps = "AIza..."
+                    ```
+                    """)
+    
+    # ─ 지도 렌더링 ─
+    if "Google" in mode and google_key:
+        render_map_google(google_key)
+    else:
+        render_map_leaflet()
+    
+    # ─ 단일 장소 상세 ─
+    st.markdown("---")
+    st.markdown("##### 📍 특정 장소 상세 보기")
+    
     hotel = PLACES[0]
-    
     col_select, col_info = st.columns([2, 1])
-    
     with col_select:
-        place_names = [p["name"] for p in PLACES]
         selected_name = st.selectbox(
-            "📌 장소 선택", 
-            place_names, 
-            key="map_place_sel",
+            "장소 선택", [p["name"] for p in PLACES],
+            key="map_place_sel", label_visibility="collapsed",
         )
-    
     place = next(p for p in PLACES if p["name"] == selected_name)
     
     with col_info:
+        if place["name"] == hotel["name"]:
+            dist_text = "🏠 우리 숙소"
+        else:
+            d = haversine_km(hotel["lat"], hotel["lon"], place["lat"], place["lon"])
+            dist_text = f"🏨 호텔에서 약 {d:.1f}km"
         st.markdown(f"""
-        <div class='card' style='margin-top:28px;'>
-            <div style='color:#ffd60a; font-weight:700;'>{place['name']}</div>
-            <div style='font-size:0.9rem; color:#cfe8ff; margin-top:4px;'>{place['info']}</div>
+        <div class='card'>
+            <div style='color:#ffd60a; font-weight:700; font-size:0.95rem;'>{place['info']}</div>
+            <div style='font-size:0.85rem; color:#9fd0ff; margin-top:4px;'>{dist_text}</div>
         </div>
         """, unsafe_allow_html=True)
     
-    # 구글지도 임베드 (API 키 불필요)
-    embed_url = (
-        f"https://maps.google.com/maps?"
-        f"q={place['lat']},{place['lon']}"
-        f"&hl=ko&z=15&output=embed"
-    )
-    st.components.v1.iframe(embed_url, height=420)
+    embed_url = f"https://maps.google.com/maps?q={place['lat']},{place['lon']}&hl=ko&z=16&output=embed"
+    st.components.v1.iframe(embed_url, height=380)
     
-    # 액션 버튼
     col_b1, col_b2 = st.columns(2)
     with col_b1:
         gmaps_url = f"https://www.google.com/maps/search/?api=1&query={place['lat']},{place['lon']}"
         st.link_button("📱 구글 지도 앱으로 열기", gmaps_url, use_container_width=True)
     with col_b2:
-        # 호텔에서 길찾기
-        dir_url = (
-            f"https://www.google.com/maps/dir/?api=1"
-            f"&origin={hotel['lat']},{hotel['lon']}"
-            f"&destination={place['lat']},{place['lon']}"
-        )
-        st.link_button("🚗 호텔에서 길찾기", dir_url, use_container_width=True)
-    
-    # 호텔로부터 거리
-    if place["name"] != hotel["name"]:
-        dist = haversine_km(hotel["lat"], hotel["lon"], place["lat"], place["lon"])
-        st.info(f"🏨 모벤픽에서 직선거리 약 **{dist:.1f}km** (실제 도로거리는 더 길 수 있어요)")
-    else:
-        st.success("🏨 우리 숙소예요!")
-    
-    # 전체 명소 한눈에
-    st.markdown("---")
-    st.markdown("##### 📍 모든 명소 한눈에")
-    
-    cols = st.columns(3)
-    for i, p in enumerate(PLACES):
-        with cols[i % 3]:
-            dist_str = ""
-            if p["name"] != hotel["name"]:
-                d = haversine_km(hotel["lat"], hotel["lon"], p["lat"], p["lon"])
-                dist_str = f" · {d:.1f}km"
-            st.markdown(f"""
-            <div class='card' style='padding:10px; margin-bottom:6px;'>
-                <div style='color:#ffd60a; font-weight:600; font-size:0.9rem;'>{p['name']}</div>
-                <div style='font-size:0.78rem; color:#9fd0ff;'>{p['info']}{dist_str}</div>
-            </div>""", unsafe_allow_html=True)
+        if place["name"] != hotel["name"]:
+            dir_url = f"https://www.google.com/maps/dir/?api=1&origin={hotel['lat']},{hotel['lon']}&destination={place['lat']},{place['lon']}"
+            st.link_button("🚗 호텔에서 길찾기", dir_url, use_container_width=True)
+        else:
+            st.link_button("ℹ️ 호텔 정보", gmaps_url, use_container_width=True)
 
 # ═══════════════════════════════════════════════════════════════
 # 10. 화면: 일정 (편집 가능)
