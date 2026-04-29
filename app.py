@@ -12,6 +12,7 @@ import re
 from datetime import datetime, date, timedelta
 from PIL import Image
 import io
+import base64
 
 # ═══════════════════════════════════════════════════════════════
 # 1. 페이지 설정
@@ -261,7 +262,7 @@ def get_weather(lat, lon):
     except Exception:
         return None
 
-def gemini_call(prompt, model_name="gemini-1.5-flash"):
+def gemini_call(prompt, model_name="gemini-2.5-flash"):
     """Gemini API 호출 (text 응답, 에러시 None)"""
     if not KEY_GEMINI:
         return None, "API 키가 설정되지 않았습니다. Secrets에 키를 등록해주세요."
@@ -271,7 +272,7 @@ def gemini_call(prompt, model_name="gemini-1.5-flash"):
     except Exception as e:
         return None, str(e)
 
-def gemini_vision(prompt, image, model_name="gemini-1.5-flash"):
+def gemini_vision(prompt, image, model_name="gemini-2.5-flash"):
     """Gemini Vision API 호출 (이미지 + 프롬프트)"""
     if not KEY_GEMINI:
         return None, "API 키가 설정되지 않았습니다."
@@ -472,7 +473,7 @@ def render_ai():
     sub_tab1, sub_tab2, sub_tab3 = st.tabs(["🤖 AI 채팅", "🇻🇳 베트남어 회화", "📷 사진 번역"])
 
     with sub_tab1:
-        st.markdown("##### 무엇이든 물어보세요 (Gemini 1.5 Flash)")
+        st.markdown("##### 무엇이든 물어보세요 (Gemini 2.5 Flash)")
         st.caption("예: '나트랑 5월 날씨 특징', '쌀국수 종류 알려줘', '아이들과 갈만한 곳'")
         
         chat_box = st.container(height=350)
@@ -491,7 +492,7 @@ def render_ai():
 한국어로 친절하고 실용적으로, 핵심만 간결하게 답하세요.
 
 질문: {prompt}"""
-                text, err = gemini_call(context, "gemini-1.5-flash")
+                text, err = gemini_call(context, "gemini-2.5-flash")
                 if text:
                     st.session_state.messages.append({"role": "assistant", "content": text})
                     st.rerun()
@@ -571,7 +572,37 @@ def render_ai():
 
                 col_img, col_opt = st.columns([2, 1])
                 with col_img:
-                    st.image(img, caption="분석할 이미지", use_container_width=True)
+                    # 🔍 줌 슬라이더 (줌아웃 ↔ 줌인)
+                    zoom = st.slider(
+                        "🔍 보기 크기 (← 줌아웃 / 줌인 →)",
+                        min_value=0.3, max_value=2.5, value=1.0, step=0.1,
+                        format="%.1fx",
+                        key="img_zoom",
+                        help="작게 보려면 왼쪽, 자세히 보려면 오른쪽으로",
+                    )
+                    
+                    # PIL 이미지를 base64로 변환해 HTML로 표시 (줌 + 스크롤 지원)
+                    buf = io.BytesIO()
+                    img_rgb = img.convert("RGB") if img.mode != "RGB" else img
+                    img_rgb.save(buf, format="JPEG", quality=85)
+                    img_b64 = base64.b64encode(buf.getvalue()).decode()
+                    width_pct = int(zoom * 100)
+                    
+                    st.markdown(f"""
+                    <div style="text-align:center; overflow:auto; max-height:500px;
+                                background:rgba(0,0,0,0.25); border-radius:10px; 
+                                padding:8px; border:1px solid rgba(255,255,255,0.1);">
+                        <img src="data:image/jpeg;base64,{img_b64}" 
+                             style="width:{width_pct}%; max-width:none; 
+                                    border-radius:6px;
+                                    box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+                    </div>
+                    <div style="text-align:center; color:#9fd0ff; 
+                                font-size:0.8rem; margin-top:6px;">
+                        📐 현재 {zoom:.1f}배 · 원본 {img.size[0]}×{img.size[1]}px
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
                 with col_opt:
                     st.markdown("**번역 모드**")
                     translate_mode = st.radio(
